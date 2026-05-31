@@ -440,60 +440,117 @@ static void render_menu(IDirect3DDevice9 *d) {
     int sw = g_sw, sh = g_sh;
     int mx = (sw - MENU_W) / 2, my = (sh - MENU_H) / 2;
 
-    /* Fond noir semi-transparent */
-    draw_rect(d, (float)mx, (float)my, (float)MENU_W, (float)MENU_H, 0xD8000000);
-    /* Bordure dorée */
-    draw_rect(d, (float)mx, (float)my, (float)MENU_W, 2, 0xFFFFC800);
-    draw_rect(d, (float)mx, (float)my + MENU_H - 2, (float)MENU_W, 2, 0xFFFFC800);
-    draw_rect(d, (float)mx, (float)my, 2, (float)MENU_H, 0xFFFFC800);
-    draw_rect(d, (float)mx + MENU_W - 2, (float)my, 2, (float)MENU_H, 0xFFFFC800);
+    /* Ombre portée (simulée avec rectangles noirs semi-transparents décalés) */
+    for (int i = 1; i <= 4; i++) {
+        draw_rect(d, (float)(mx + i), (float)(my + i), (float)MENU_W, (float)MENU_H, 0x40000000);
+    }
+
+    /* Fond principal avec bordure subtile */
+    draw_rect(d, (float)mx, (float)my, (float)MENU_W, (float)MENU_H, 0xF0181818);
+    draw_rect(d, (float)mx, (float)my, (float)MENU_W, 1, 0xFFFFC800);
+    draw_rect(d, (float)mx, (float)my + MENU_H - 1, (float)MENU_W, 1, 0xFFFFC800);
+    draw_rect(d, (float)mx, (float)my, 1, (float)MENU_H, 0xFFFFC800);
+    draw_rect(d, (float)mx + MENU_W - 1, (float)my, 1, (float)MENU_H, 0xFFFFC800);
+
+    /* Header bar avec dégradé doré/noir */
+    draw_rect(d, (float)mx, (float)my, (float)MENU_W, 36, 0xFFFFC800);
+    draw_rect(d, (float)mx, (float)my + 34, (float)MENU_W, 2, 0xFFD4A000);
 
     /* Title */
-    RECT r = {mx, my, mx+MENU_W, my+32};
-    g_font->DrawTextA(NULL, MOD_NAME " " MOD_VER, -1, &r, DT_CENTER | DT_VCENTER, 0xFFFFC800);
+    RECT r = {mx, my, mx+MENU_W, my+36};
+    g_font->DrawTextA(NULL, MOD_NAME " " MOD_VER, -1, &r, DT_CENTER | DT_VCENTER, 0xFF000000);
 
     /* Tabs */
     float tw = (float)MENU_W / TAB_COUNT;
+    int tab_y = my + 40;
     for (int i = 0; i < TAB_COUNT; i++) {
         int tx = mx + (int)(i * tw);
-        RECT tr = {tx, my+32, tx+(int)tw, my+56};
-        D3DCOLOR c = (i == g_tab) ? 0xFFFFC800 : 0xFFC8C8C8;
-        g_font_small->DrawTextA(NULL, tabs[i].name, -1, &tr, DT_CENTER | DT_VCENTER, c);
+        RECT tr = {tx, tab_y, tx+(int)tw, tab_y+24};
+        if (i == g_tab) {
+            /* Tab actif: fond doré */
+            draw_rect(d, (float)(tx + 4), (float)(tab_y + 2), (float)(tw - 8), 22, 0x60FFC800);
+            draw_rect(d, (float)(tx + 4), (float)(tab_y + 22), (float)(tw - 8), 2, 0xFFFFC800);
+            g_font_small->DrawTextA(NULL, tabs[i].name, -1, &tr, DT_CENTER | DT_VCENTER, 0xFFFFC800);
+        } else {
+            g_font_small->DrawTextA(NULL, tabs[i].name, -1, &tr, DT_CENTER | DT_VCENTER, 0xFF909090);
+        }
     }
+
+    /* Ligne de séparation */
+    draw_rect(d, (float)(mx + 8), (float)(tab_y + 26), (float)(MENU_W - 16), 1, 0xFF404040);
 
     /* Items */
     Tab *cur = &tabs[g_tab];
+    int items_y = tab_y + 32;
     for (int i = 0; i < cur->count; i++) {
-        int iy = my + 60 + i * ITEM_H;
+        int iy = items_y + i * (ITEM_H + 4);
         Item *it = &cur->items[i];
-        D3DCOLOR c = (i == g_sel) ? 0xFFFFC800 : 0xFFE6E6E6;
-        /* Fond de sélection */
-        if (i == g_sel) {
-            draw_rect(d, (float)mx + 4, (float)iy, (float)MENU_W - 8, (float)ITEM_H, 0x40FFC800);
+        
+        /* Fond de ligne alterné */
+        if (i % 2 == 0) {
+            draw_rect(d, (float)(mx + 8), (float)iy, (float)(MENU_W - 16), (float)ITEM_H, 0x20FFFFFF);
         }
-        RECT ir = {mx+12, iy, mx+MENU_W-12, iy+ITEM_H};
-        g_font_small->DrawTextA(NULL, it->name, -1, &ir, DT_LEFT | DT_VCENTER, c);
+        
+        /* Barre de sélection à gauche */
+        if (i == g_sel) {
+            draw_rect(d, (float)(mx + 4), (float)iy, 3, (float)ITEM_H, 0xFFFFC800);
+            draw_rect(d, (float)(mx + 8), (float)iy, (float)(MENU_W - 16), (float)ITEM_H, 0x30FFC800);
+        }
+        
+        /* Nom de l'item */
+        RECT ir = {mx+18, iy, mx+MENU_W-80, iy+ITEM_H};
+        D3DCOLOR text_c = (i == g_sel) ? 0xFFFFFFFF : 0xFFC8C8C8;
+        g_font_small->DrawTextA(NULL, it->name, -1, &ir, DT_LEFT | DT_VCENTER, text_c);
+        
+        /* Valeur / Toggle */
         if (it->type == 0 && it->val) {
             int val = *(int*)it->val;
-            RECT vr = {mx, iy, mx+MENU_W-12, iy+ITEM_H};
-            g_font_small->DrawTextA(NULL, val ? "ON" : "OFF", -1, &vr, DT_RIGHT | DT_VCENTER,
-                                      val ? 0xFF00E650 : 0xFFE63C3C);
+            int toggle_x = mx + MENU_W - 70;
+            int toggle_y = iy + 4;
+            int toggle_w = 50;
+            int toggle_h = ITEM_H - 8;
+            
+            if (val) {
+                /* Toggle ON - vert avec checkmark */
+                draw_rect(d, (float)toggle_x, (float)toggle_y, (float)toggle_w, (float)toggle_h, 0xFF00AA00);
+                RECT tr = {toggle_x, toggle_y, toggle_x+toggle_w, toggle_y+toggle_h};
+                g_font_small->DrawTextA(NULL, "ON", -1, &tr, DT_CENTER | DT_VCENTER, 0xFFFFFFFF);
+            } else {
+                /* Toggle OFF - gris rougeâtre */
+                draw_rect(d, (float)toggle_x, (float)toggle_y, (float)toggle_w, (float)toggle_h, 0xFF444444);
+                RECT tr = {toggle_x, toggle_y, toggle_x+toggle_w, toggle_y+toggle_h};
+                g_font_small->DrawTextA(NULL, "OFF", -1, &tr, DT_CENTER | DT_VCENTER, 0xFF888888);
+            }
         } else if (it->type == 1 && it->val) {
             if (g_editing_item_ptr == it) {
-                /* Edit mode: show text box with blinking cursor */
+                /* Edit mode: boîte de saisie stylisée */
+                int edit_x = mx + MENU_W - 130;
+                draw_rect(d, (float)edit_x, (float)(iy + 2), 120, (float)(ITEM_H - 4), 0xFF0A0A0A);
+                draw_rect(d, (float)edit_x, (float)(iy + 2), 120, 1, 0xFFFFC800);
+                draw_rect(d, (float)edit_x, (float)(iy + ITEM_H - 5), 120, 1, 0xFFFFC800);
                 char buf[48];
                 int show_cursor = ((GetTickCount() - g_edit_cursor_t) / 500) % 2;
                 snprintf(buf, sizeof(buf), "%s%s", g_edit_buf, show_cursor ? "_" : "");
-                RECT vr = {mx, iy, mx+MENU_W-12, iy+ITEM_H};
-                g_font_small->DrawTextA(NULL, buf, -1, &vr, DT_RIGHT | DT_VCENTER, 0xFF00FFFF);
+                RECT vr = {edit_x + 4, iy, mx+MENU_W-8, iy+ITEM_H};
+                g_font_small->DrawTextA(NULL, buf, -1, &vr, DT_RIGHT | DT_VCENTER, 0xFFFFC800);
             } else {
+                /* Valeur numérique avec fond */
                 int val = *(int*)it->val;
                 char buf[32]; snprintf(buf, sizeof(buf), "%d", val);
-                RECT vr = {mx, iy, mx+MENU_W-12, iy+ITEM_H};
-                g_font_small->DrawTextA(NULL, buf, -1, &vr, DT_RIGHT | DT_VCENTER, 0xFF00A0FF);
+                int val_w = 80;
+                int val_x = mx + MENU_W - val_w - 8;
+                draw_rect(d, (float)val_x, (float)(iy + 4), (float)val_w, (float)(ITEM_H - 8), 0x30FFFFFF);
+                RECT vr = {val_x, iy, val_x+val_w, iy+ITEM_H};
+                g_font_small->DrawTextA(NULL, buf, -1, &vr, DT_CENTER | DT_VCENTER, 0xFFFFC800);
             }
         }
     }
+
+    /* Footer avec instructions */
+    int foot_y = my + MENU_H - 24;
+    draw_rect(d, (float)(mx + 8), (float)(foot_y - 4), (float)(MENU_W - 16), 1, 0xFF404040);
+    RECT fr = {mx, foot_y, mx+MENU_W, foot_y+20};
+    g_font_small->DrawTextA(NULL, "ENTER: Toggle/Edit  |  ARROWS: Navigate  |  ESC: Cancel Edit", -1, &fr, DT_CENTER | DT_VCENTER, 0xFF808080);
 }
 
 static void render_overlay(IDirect3DDevice9 *d) {
