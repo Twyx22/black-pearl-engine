@@ -46,6 +46,129 @@ static struct {
 } g_cheats = {0};
 
 /* ================================================================
+ * Memory Patcher
+ * ================================================================ */
+static void patch_mem(DWORD addr, const void *data, size_t len) {
+    DWORD old;
+    if (VirtualProtect((LPVOID)addr, len, PAGE_EXECUTE_READWRITE, &old)) {
+        memcpy((void*)addr, data, len);
+        VirtualProtect((LPVOID)addr, len, old, &old);
+    }
+}
+
+/* Stud counter: SUB [0x00E41868], val at 0x00453664 and 0x00453684 */
+#define STUD_SUB1_ADDR 0x00453664
+#define STUD_SUB2_ADDR 0x00453684
+static unsigned char g_stud_sub1_orig[10];
+static unsigned char g_stud_sub2_orig[10];
+static int g_stud_patched = 0;
+
+static void apply_stud_patch(void) {
+    if (g_stud_patched) return;
+    /* Save originals */
+    memcpy(g_stud_sub1_orig, (void*)STUD_SUB1_ADDR, 10);
+    memcpy(g_stud_sub2_orig, (void*)STUD_SUB2_ADDR, 10);
+    /* NOP the SUB instructions (10 bytes each) */
+    unsigned char nops[10] = {0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90};
+    patch_mem(STUD_SUB1_ADDR, nops, 10);
+    patch_mem(STUD_SUB2_ADDR, nops, 10);
+    g_stud_patched = 1;
+    LOG("Infinite Studs: patched");
+}
+
+static void remove_stud_patch(void) {
+    if (!g_stud_patched) return;
+    patch_mem(STUD_SUB1_ADDR, g_stud_sub1_orig, 10);
+    patch_mem(STUD_SUB2_ADDR, g_stud_sub2_orig, 10);
+    g_stud_patched = 0;
+    LOG("Infinite Studs: unpatched");
+}
+
+/* Health: Search for DEC BYTE PTR [reg+0x864] patterns */
+static DWORD g_health_addrs[16];
+static unsigned char g_health_origs[16][4];
+static int g_health_count = 0;
+static int g_health_patched = 0;
+
+static void scan_health_decrements(void) {
+    if (g_health_count > 0) return;
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    if (!base) return;
+    
+    /* Get .text section info */
+    PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)base;
+    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)(base + dos->e_lfanew);
+    PIMAGE_SECTION_HEADER sec = IMAGE_FIRST_SECTION(nt);
+    DWORD text_start = 0, text_size = 0;
+    for (int i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+        if (memcmp(sec[i].Name, ".text", 5) == 0) {
+            text_start = base + sec[i].VirtualAddress;
+            text_size = sec[i].Misc.VirtualSize;
+            break;
+        }
+    }
+    if (!text_start || !text_size) return;
+    
+    /* Search for DEC BYTE PTR [reg+0x864] and SUB BYTE PTR [reg+0x864], 1 */
+    unsigned char *code = (unsigned char*)text_start;
+    for (DWORD i = 0; i < text_size - 10 && g_health_count < 16; i++) {
+        /* DEC BYTE PTR [reg+disp32] = FE /1 */
+        if (code[i] == 0xFE && (code[i+1] & 0xC0) == 0x80) {
+            DWORD disp = *(DWORD*)(code + i + 2);
+            if (disp == 0x864) {
+                g_health_addrs[g_health_count] = text_start + i;
+                memcpy(g_health_origs[g_health_count], code + i, 4);
+                g_health_count++;
+            }
+        }
+        /* SUB BYTE PTR [reg+disp32], 1 = 80 /5 */
+        if (code[i] == 0x80 && (code[i+1] & 0xC0) == 0x80 && code[i+6] == 0x01) {
+            DWORD disp = *(DWORD*)(code + i + 2);
+            if (disp == 0x864) {
+                g_health_addrs[g_health_count] = text_start + i;
+                memcpy(g_health_origs[g_health_count], code + i, 4);
+                g_health_count++;
+            }
+        }
+        /* SUB DWORD PTR [reg+disp32], 1 = 83 /5 */
+        if (code[i] == 0x83 && (code[i+1] & 0xC0) == 0x80 && code[i+6] == 0x01) {
+            DWORD disp = *(DWORD*)(code + i + 2);
+            if (disp == 0x864) {
+                g_health_addrs[g_health_count] = text_start + i;
+                memcpy(g_health_origs[g_health_count], code + i, 4);
+                g_health_count++;
+            }
+        }
+    }
+    LOG("Health decrements found: %d", g_health_count);
+}
+
+static void apply_health_patch(void) {
+    if (g_health_patched) return;
+    scan_health_decrements();
+    unsigned char nop4[4] = {0x90, 0x90, 0x90, 0x90};
+    for (int i = 0; i < g_health_count; i++) {
+        patch_mem(g_health_addrs[i], nop4, 4);
+    }
+    g_health_patched = 1;
+    LOG("Invincibility: patched %d locations", g_health_count);
+}
+
+static void remove_health_patch(void) {
+    if (!g_health_patched) return;
+    for (int i = 0; i < g_health_count; i++) {
+        patch_mem(g_health_addrs[i], g_health_origs[i], 4);
+    }
+    g_health_patched = 0;
+    LOG("Invincibility: unpatched");
+}
+
+static void update_cheats(void) {
+    if (g_cheats.infinite_studs) apply_stud_patch(); else remove_stud_patch();
+    if (g_cheats.invincible) apply_health_patch(); else remove_health_patch();
+}
+
+/* ================================================================
  * Entity Scanner
  * ================================================================ */
 #define ENTITY_TABLE_OFF 0x00C8F400
@@ -308,6 +431,7 @@ static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
     
     update_fps();
     update_input();
+    update_cheats();
     render_overlay(d);
     render_debug(d);
     render_menu(d);
