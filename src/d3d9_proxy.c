@@ -169,30 +169,56 @@ static void update_fps(void) {
 
 static int g_sw = 1280, g_sh = 720;
 
+typedef struct { float x, y, z, rhw; D3DCOLOR color; } Vertex;
+
+static void draw_rect(IDirect3DDevice9 *d, float x, float y, float w, float h, D3DCOLOR c) {
+    Vertex v[4] = {
+        {x,   y,   0, 1, c},
+        {x+w, y,   0, 1, c},
+        {x,   y+h, 0, 1, c},
+        {x+w, y+h, 0, 1, c}
+    };
+    d->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    d->SetTexture(0, NULL);
+    d->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(Vertex));
+}
+
 static void render_menu(IDirect3DDevice9 *d) {
     if (!g_menu_open || !g_font || !g_font_small) return;
     int sw = g_sw, sh = g_sh;
     int mx = (sw - MENU_W) / 2, my = (sh - MENU_H) / 2;
-    
+
+    /* Fond noir semi-transparent */
+    draw_rect(d, (float)mx, (float)my, (float)MENU_W, (float)MENU_H, 0xD8000000);
+    /* Bordure dorée */
+    draw_rect(d, (float)mx, (float)my, (float)MENU_W, 2, 0xFFFFC800);
+    draw_rect(d, (float)mx, (float)my + MENU_H - 2, (float)MENU_W, 2, 0xFFFFC800);
+    draw_rect(d, (float)mx, (float)my, 2, (float)MENU_H, 0xFFFFC800);
+    draw_rect(d, (float)mx + MENU_W - 2, (float)my, 2, (float)MENU_H, 0xFFFFC800);
+
     /* Title */
     RECT r = {mx, my, mx+MENU_W, my+32};
     g_font->DrawTextA(NULL, MOD_NAME " " MOD_VER, -1, &r, DT_CENTER | DT_VCENTER, 0xFFFFC800);
-    
+
     /* Tabs */
     float tw = (float)MENU_W / TAB_COUNT;
     for (int i = 0; i < TAB_COUNT; i++) {
         int tx = mx + (int)(i * tw);
         RECT tr = {tx, my+32, tx+(int)tw, my+56};
-        D3DCOLOR c = (i == g_tab) ? 0xFF000000 : 0xFFC8C8C8;
+        D3DCOLOR c = (i == g_tab) ? 0xFFFFC800 : 0xFFC8C8C8;
         g_font_small->DrawTextA(NULL, tabs[i].name, -1, &tr, DT_CENTER | DT_VCENTER, c);
     }
-    
+
     /* Items */
     Tab *cur = &tabs[g_tab];
     for (int i = 0; i < cur->count; i++) {
         int iy = my + 60 + i * ITEM_H;
         Item *it = &cur->items[i];
         D3DCOLOR c = (i == g_sel) ? 0xFFFFC800 : 0xFFE6E6E6;
+        /* Fond de sélection */
+        if (i == g_sel) {
+            draw_rect(d, (float)mx + 4, (float)iy, (float)MENU_W - 8, (float)ITEM_H, 0x40FFC800);
+        }
         RECT ir = {mx+12, iy, mx+MENU_W-12, iy+ITEM_H};
         g_font_small->DrawTextA(NULL, it->name, -1, &ir, DT_LEFT | DT_VCENTER, c);
         if (it->type == 0 && it->val) {
@@ -223,14 +249,24 @@ static void render_debug(IDirect3DDevice9 *d) {
     if (!g_cheats.show_debug || !g_font_small) return;
     int sw = g_sw, sh = g_sh;
     int pw = 360, px = sw - pw - 10, py = 30;
-    
+
+    /* Fond debug */
+    draw_rect(d, (float)px, (float)py, (float)pw, 340, 0xD8000000);
+    draw_rect(d, (float)px, (float)py, (float)pw, 2, 0xFFFFC800);
+
     RECT tr = {px, py, px+pw, py+20};
     g_font_small->DrawTextA(NULL, "=== GAME STRINGS ===", -1, &tr, DT_CENTER, 0xFFFFC800);
-    
+
+    if (g_entity_count <= 0) {
+        RECT er = {px, py+25, px+pw, py+45};
+        g_font_small->DrawTextA(NULL, "No entities found", -1, &er, DT_CENTER, 0xFFE63C3C);
+        return;
+    }
+
     static int scroll = 0;
     static DWORD scroll_t = 0;
     if (GetTickCount() - scroll_t > 2000) { scroll_t = GetTickCount(); scroll++; if (scroll >= g_entity_count) scroll = 0; }
-    
+
     int y = py + 25;
     for (int i = 0; i < 20 && y < sh - 20; i++) {
         int idx = (scroll + i) % g_entity_count;
