@@ -43,7 +43,9 @@ static struct {
     int invincible, infinite_studs, super_speed, super_jump;
     int moon_jump, time_freeze, noclip, show_debug, show_fps;
     int score_mult;
-} g_cheats = {0};
+    int force_custom_studs;
+    int custom_stud_value;
+} g_cheats = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 999999};
 
 /* ================================================================
  * Memory Patcher
@@ -163,9 +165,25 @@ static void remove_health_patch(void) {
     LOG("Invincibility: unpatched");
 }
 
+/* ================================================================
+ * Custom Stud Forcer
+ * ================================================================ */
+#define STUD_DISPLAY_ADDR 0x0359B660
+
+static void force_custom_studs(void) {
+    if (!g_cheats.force_custom_studs) return;
+    DWORD addr = STUD_DISPLAY_ADDR;
+    DWORD old;
+    if (VirtualProtect((LPVOID)addr, 4, PAGE_READWRITE, &old)) {
+        *(int*)addr = g_cheats.custom_stud_value;
+        VirtualProtect((LPVOID)addr, 4, old, &old);
+    }
+}
+
 static void update_cheats(void) {
     if (g_cheats.infinite_studs) apply_stud_patch(); else remove_stud_patch();
     if (g_cheats.invincible) apply_health_patch(); else remove_health_patch();
+    force_custom_studs();
 }
 
 /* ================================================================
@@ -214,6 +232,8 @@ static Item health_items[] = {
 };
 static Item stud_items[] = {
     {"Infinite Studs", 0, &g_cheats.infinite_studs},
+    {"Force Custom Value", 0, &g_cheats.force_custom_studs},
+    {"Custom Studs", 1, &g_cheats.custom_stud_value, 0, 9999999},
     {"Stud Magnet", 0, NULL},
     {"Score Multiplier", 1, &g_cheats.score_mult, 1, 10},
 };
@@ -231,7 +251,7 @@ static Item visual_items[] = {
 
 static Tab tabs[] = {
     {"Health", health_items, 4},
-    {"Studs", stud_items, 3},
+    {"Studs", stud_items, 5},
     {"Fun", fun_items, 5},
     {"Visual", visual_items, 2},
 };
@@ -266,14 +286,22 @@ static void update_input(void) {
         Item *it = &tabs[g_tab].items[g_sel];
         if (it->type == 1 && it->val) {
             int *v = (int*)it->val;
-            *v -= 1; if (*v < it->min) *v = it->min;
+            if (*v >= 1000) *v -= 1000;
+            else if (*v >= 100) *v -= 100;
+            else if (*v >= 10) *v -= 10;
+            else *v -= 1;
+            if (*v < it->min) *v = it->min;
         }
     }
     if (key_pressed(VK_RIGHT)) {
         Item *it = &tabs[g_tab].items[g_sel];
         if (it->type == 1 && it->val) {
             int *v = (int*)it->val;
-            *v += 1; if (*v > it->max) *v = it->max;
+            if (*v >= 1000) *v += 1000;
+            else if (*v >= 100) *v += 100;
+            else if (*v >= 10) *v += 10;
+            else *v += 1;
+            if (*v > it->max) *v = it->max;
         }
     }
 }
@@ -349,6 +377,11 @@ static void render_menu(IDirect3DDevice9 *d) {
             RECT vr = {mx, iy, mx+MENU_W-12, iy+ITEM_H};
             g_font_small->DrawTextA(NULL, val ? "ON" : "OFF", -1, &vr, DT_RIGHT | DT_VCENTER,
                                       val ? 0xFF00E650 : 0xFFE63C3C);
+        } else if (it->type == 1 && it->val) {
+            int val = *(int*)it->val;
+            char buf[32]; snprintf(buf, sizeof(buf), "%d", val);
+            RECT vr = {mx, iy, mx+MENU_W-12, iy+ITEM_H};
+            g_font_small->DrawTextA(NULL, buf, -1, &vr, DT_RIGHT | DT_VCENTER, 0xFF00A0FF);
         }
     }
 }
