@@ -58,30 +58,79 @@ static void patch_mem(DWORD addr, const void *data, size_t len) {
     }
 }
 
-/* Stud counter: SUB [0x00E41868], val at 0x00453664 and 0x00453684 */
-#define STUD_SUB1_ADDR 0x00453664
-#define STUD_SUB2_ADDR 0x00453684
-static unsigned char g_stud_sub1_orig[10];
-static unsigned char g_stud_sub2_orig[10];
+/* Stud counter: dynamically find all SUB [0x00E41868] instructions */
+#define STUD_COUNTER_ADDR 0x00E41868
+#define MAX_STUD_PATCHES 32
+static DWORD g_stud_patch_addrs[MAX_STUD_PATCHES];
+static unsigned char g_stud_patch_origs[MAX_STUD_PATCHES][10];
+static int g_stud_patch_count = 0;
 static int g_stud_patched = 0;
+
+static void scan_stud_subtractions(void) {
+    if (g_stud_patch_count > 0) return;
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    if (!base) return;
+    
+    PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)base;
+    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)(base + dos->e_lfanew);
+    PIMAGE_SECTION_HEADER sec = IMAGE_FIRST_SECTION(nt);
+    DWORD text_start = 0, text_size = 0;
+    for (int i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+        if (memcmp(sec[i].Name, ".text", 5) == 0) {
+            text_start = base + sec[i].VirtualAddress;
+            text_size = sec[i].Misc.VirtualSize;
+            break;
+        }
+    }
+    if (!text_start || !text_size) return;
+    
+    unsigned char *code = (unsigned char*)text_start;
+    for (DWORD i = 0; i < text_size - 10 && g_stud_patch_count < MAX_STUD_PATCHES; i++) {
+        /* SUB DWORD PTR [disp32], imm32 = 81 /5 disp32 imm32 */
+        if (code[i] == 0x81 && (code[i+1] & 0xC7) == 0x05) {
+            DWORD disp = *(DWORD*)(code + i + 2);
+            if (disp == STUD_COUNTER_ADDR) {
+                g_stud_patch_addrs[g_stud_patch_count] = text_start + i;
+                memcpy(g_stud_patch_origs[g_stud_patch_count], code + i, 10);
+                g_stud_patch_count++;
+            }
+        }
+        /* SUB DWORD PTR [disp32], imm8 = 83 /5 disp32 imm8 */
+        if (code[i] == 0x83 && (code[i+1] & 0xC7) == 0x05) {
+            DWORD disp = *(DWORD*)(code + i + 2);
+            if (disp == STUD_COUNTER_ADDR) {
+                g_stud_patch_addrs[g_stud_patch_count] = text_start + i;
+                memcpy(g_stud_patch_origs[g_stud_patch_count], code + i, 7);
+                g_stud_patch_count++;
+            }
+        }
+    }
+    LOG("Stud subtractions found: %d", g_stud_patch_count);
+}
 
 static void apply_stud_patch(void) {
     if (g_stud_patched) return;
-    /* Save originals */
-    memcpy(g_stud_sub1_orig, (void*)STUD_SUB1_ADDR, 10);
-    memcpy(g_stud_sub2_orig, (void*)STUD_SUB2_ADDR, 10);
-    /* NOP the SUB instructions (10 bytes each) */
+    scan_stud_subtractions();
     unsigned char nops[10] = {0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90};
-    patch_mem(STUD_SUB1_ADDR, nops, 10);
-    patch_mem(STUD_SUB2_ADDR, nops, 10);
+    for (int i = 0; i < g_stud_patch_count; i++) {
+        int len = 10;
+        /* Detect instruction length based on opcode */
+        unsigned char *p = g_stud_patch_origs[i];
+        if (p[0] == 0x83) len = 7;
+        patch_mem(g_stud_patch_addrs[i], nops, len);
+    }
     g_stud_patched = 1;
-    LOG("Infinite Studs: patched");
+    LOG("Infinite Studs: patched %d locations", g_stud_patch_count);
 }
 
 static void remove_stud_patch(void) {
     if (!g_stud_patched) return;
-    patch_mem(STUD_SUB1_ADDR, g_stud_sub1_orig, 10);
-    patch_mem(STUD_SUB2_ADDR, g_stud_sub2_orig, 10);
+    for (int i = 0; i < g_stud_patch_count; i++) {
+        int len = 10;
+        unsigned char *p = g_stud_patch_origs[i];
+        if (p[0] == 0x83) len = 7;
+        patch_mem(g_stud_patch_addrs[i], g_stud_patch_origs[i], len);
+    }
     g_stud_patched = 0;
     LOG("Infinite Studs: unpatched");
 }
@@ -217,6 +266,12 @@ static ID3DXFont *g_font_small = NULL;
 static int g_menu_open = 0, g_ready = 0, g_frame = 0;
 static int g_sel = 0, g_tab = 0;
 
+/* Input text box state (forward declared, defined after Item type) */
+static void *g_editing_item_ptr = NULL;
+static char g_edit_buf[32] = {0};
+static int g_edit_len = 0;
+static DWORD g_edit_cursor_t = 0;
+
 #define MENU_W 480
 #define MENU_H 440
 #define ITEM_H 24
@@ -270,38 +325,84 @@ static int key_pressed(int vk) {
     return press;
 }
 
+static int is_digit_key(int vk) {
+    return (vk >= '0' && vk <= '9') || (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9);
+}
+
+static int vk_to_digit(int vk) {
+    if (vk >= '0' && vk <= '9') return vk - '0';
+    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) return vk - VK_NUMPAD0;
+    return -1;
+}
+
 static void update_input(void) {
-    if (key_pressed(VK_F1)) g_menu_open = !g_menu_open;
-    if (key_pressed(VK_F2)) g_cheats.show_debug = !g_cheats.show_debug;
-    if (!g_menu_open) return;
+    if (key_pressed(VK_F1)) {
+        g_menu_open = !g_menu_open;
+        g_editing_item_ptr = NULL;
+    }
+    if (!g_menu_open) {
+        if (key_pressed(VK_F2)) g_cheats.show_debug = !g_cheats.show_debug;
+        return;
+    }
+    
+    /* Input text box mode */
+    if (g_editing_item_ptr) {
+        if (key_pressed(VK_RETURN)) {
+            /* Confirm */
+            if (g_edit_len > 0) {
+                int val = atoi(g_edit_buf);
+                Item *it = (Item*)g_editing_item_ptr;
+                if (val < it->min) val = it->min;
+                if (val > it->max) val = it->max;
+                *(int*)it->val = val;
+            }
+            g_editing_item_ptr = NULL;
+            return;
+        }
+        if (key_pressed(VK_ESCAPE)) {
+            /* Cancel */
+            g_editing_item_ptr = NULL;
+            return;
+        }
+        if (key_pressed(VK_BACK)) {
+            if (g_edit_len > 0) {
+                g_edit_buf[--g_edit_len] = '\0';
+            }
+            return;
+        }
+        /* Check digit keys */
+        for (int vk = '0'; vk <= '9'; vk++) {
+            if (key_pressed(vk) && g_edit_len < 15) {
+                g_edit_buf[g_edit_len++] = (char)vk;
+                g_edit_buf[g_edit_len] = '\0';
+                return;
+            }
+        }
+        for (int vk = VK_NUMPAD0; vk <= VK_NUMPAD9; vk++) {
+            if (key_pressed(vk) && g_edit_len < 15) {
+                g_edit_buf[g_edit_len++] = '0' + (vk - VK_NUMPAD0);
+                g_edit_buf[g_edit_len] = '\0';
+                return;
+            }
+        }
+        return; /* Consume all other keys while editing */
+    }
+    
+    /* Normal menu navigation */
     if (key_pressed(VK_UP))   { g_sel--; if (g_sel < 0) g_sel = 0; }
     if (key_pressed(VK_DOWN)) { g_sel++; if (g_sel >= tabs[g_tab].count) g_sel = tabs[g_tab].count - 1; }
     if (key_pressed(VK_LEFT))  { g_tab = (g_tab - 1 + TAB_COUNT) % TAB_COUNT; g_sel = 0; }
     if (key_pressed(VK_RIGHT)) { g_tab = (g_tab + 1) % TAB_COUNT; g_sel = 0; }
     if (key_pressed(VK_RETURN)) {
         Item *it = &tabs[g_tab].items[g_sel];
-        if (it->type == 0 && it->val) *(int*)it->val = !*(int*)it->val;
-    }
-    if (key_pressed(VK_LEFT)) {
-        Item *it = &tabs[g_tab].items[g_sel];
-        if (it->type == 1 && it->val) {
-            int *v = (int*)it->val;
-            if (*v >= 1000) *v -= 1000;
-            else if (*v >= 100) *v -= 100;
-            else if (*v >= 10) *v -= 10;
-            else *v -= 1;
-            if (*v < it->min) *v = it->min;
-        }
-    }
-    if (key_pressed(VK_RIGHT)) {
-        Item *it = &tabs[g_tab].items[g_sel];
-        if (it->type == 1 && it->val) {
-            int *v = (int*)it->val;
-            if (*v >= 1000) *v += 1000;
-            else if (*v >= 100) *v += 100;
-            else if (*v >= 10) *v += 10;
-            else *v += 1;
-            if (*v > it->max) *v = it->max;
+        if (it->type == 0 && it->val) {
+            *(int*)it->val = !*(int*)it->val;
+        } else if (it->type == 1 && it->val) {
+            /* Enter edit mode */
+            g_editing_item_ptr = it;
+            g_edit_len = 0;
+            g_edit_buf[0] = '\0';
+            g_edit_cursor_t = GetTickCount();
         }
     }
 }
@@ -378,10 +479,19 @@ static void render_menu(IDirect3DDevice9 *d) {
             g_font_small->DrawTextA(NULL, val ? "ON" : "OFF", -1, &vr, DT_RIGHT | DT_VCENTER,
                                       val ? 0xFF00E650 : 0xFFE63C3C);
         } else if (it->type == 1 && it->val) {
-            int val = *(int*)it->val;
-            char buf[32]; snprintf(buf, sizeof(buf), "%d", val);
-            RECT vr = {mx, iy, mx+MENU_W-12, iy+ITEM_H};
-            g_font_small->DrawTextA(NULL, buf, -1, &vr, DT_RIGHT | DT_VCENTER, 0xFF00A0FF);
+            if (g_editing_item_ptr == it) {
+                /* Edit mode: show text box with blinking cursor */
+                char buf[48];
+                int show_cursor = ((GetTickCount() - g_edit_cursor_t) / 500) % 2;
+                snprintf(buf, sizeof(buf), "%s%s", g_edit_buf, show_cursor ? "_" : "");
+                RECT vr = {mx, iy, mx+MENU_W-12, iy+ITEM_H};
+                g_font_small->DrawTextA(NULL, buf, -1, &vr, DT_RIGHT | DT_VCENTER, 0xFF00FFFF);
+            } else {
+                int val = *(int*)it->val;
+                char buf[32]; snprintf(buf, sizeof(buf), "%d", val);
+                RECT vr = {mx, iy, mx+MENU_W-12, iy+ITEM_H};
+                g_font_small->DrawTextA(NULL, buf, -1, &vr, DT_RIGHT | DT_VCENTER, 0xFF00A0FF);
+            }
         }
     }
 }
@@ -495,6 +605,74 @@ static void hook_device(IDirect3DDevice9 *dev) {
 }
 
 /* ================================================================
+ * Input Blocker (PeekMessageA Hook)
+ * ================================================================ */
+static BOOL (WINAPI *real_PeekMessageA)(LPMSG, HWND, UINT, UINT, UINT) = NULL;
+
+static BOOL WINAPI hk_PeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin,
+                                    UINT wMsgFilterMax, UINT wRemoveMsg) {
+    BOOL ret = real_PeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
+    if (!ret || !g_menu_open) return ret;
+    
+    /* Filter out keyboard messages when menu is open */
+    if (lpMsg->message == WM_KEYDOWN || lpMsg->message == WM_KEYUP ||
+        lpMsg->message == WM_SYSKEYDOWN || lpMsg->message == WM_SYSKEYUP) {
+        int vk = (int)lpMsg->wParam;
+        /* Block arrow keys, Enter, Escape, Tab when menu is open */
+        if (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT ||
+            vk == VK_RETURN || vk == VK_ESCAPE || vk == VK_TAB ||
+            (vk >= '0' && vk <= '9') || (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) ||
+            vk == VK_BACK || vk == VK_F1 || vk == VK_F2) {
+            /* Remove message from queue */
+            if (wRemoveMsg & PM_REMOVE) {
+                lpMsg->message = WM_NULL;
+                lpMsg->wParam = 0;
+                lpMsg->lParam = 0;
+            }
+            return FALSE;
+        }
+    }
+    return ret;
+}
+
+static void hook_peekmessage(void) {
+    if (real_PeekMessageA) return;
+    HMODULE hUser32 = GetModuleHandleA("user32.dll");
+    if (!hUser32) return;
+    real_PeekMessageA = (BOOL (WINAPI *)(LPMSG, HWND, UINT, UINT, UINT))
+        GetProcAddress(hUser32, "PeekMessageA");
+    if (!real_PeekMessageA) return;
+    
+    /* IAT hook on the game's PeekMessageA import */
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    if (!base) return;
+    
+    PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)base;
+    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)(base + dos->e_lfanew);
+    PIMAGE_IMPORT_DESCRIPTOR import = (PIMAGE_IMPORT_DESCRIPTOR)(base + nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    
+    while (import->Name) {
+        const char *name = (const char*)(base + import->Name);
+        if (_stricmp(name, "USER32.dll") == 0 || _stricmp(name, "user32.dll") == 0) {
+            PIMAGE_THUNK_DATA thunk = (PIMAGE_THUNK_DATA)(base + import->FirstThunk);
+            while (thunk->u1.Function) {
+                if ((DWORD)thunk->u1.Function == (DWORD)real_PeekMessageA) {
+                    DWORD old;
+                    if (VirtualProtect(&thunk->u1.Function, sizeof(void*), PAGE_READWRITE, &old)) {
+                        thunk->u1.Function = (ULONG_PTR)hk_PeekMessageA;
+                        VirtualProtect(&thunk->u1.Function, sizeof(void*), old, &old);
+                        LOG("PeekMessageA hooked");
+                        return;
+                    }
+                }
+                thunk++;
+            }
+        }
+        import++;
+    }
+}
+
+/* ================================================================
  * D3D9 Proxy
  * ================================================================ */
 static IDirect3D9* (WINAPI *real_D3DCreate9)(UINT) = NULL;
@@ -574,6 +752,7 @@ BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID reserved) {
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls(hInst);
             LOG("=== " MOD_NAME " " MOD_VER " ===");
+            hook_peekmessage();
             return TRUE;
         case DLL_PROCESS_DETACH:
             if (g_log) { fclose(g_log); g_log = NULL; }
