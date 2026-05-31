@@ -1,0 +1,10 @@
+.vscode/
+build/
+*.dll
+*.exe
+*.log
+*.o
+*.obj
+*.pdb
+lego_mod.log
+compile_commands.json
