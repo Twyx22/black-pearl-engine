@@ -233,7 +233,7 @@ static Item health_items[] = {
 static Item stud_items[] = {
     {"Infinite Studs", 0, &g_cheats.infinite_studs},
     {"Force Custom Value", 0, &g_cheats.force_custom_studs},
-    {"Custom Studs", 1, &g_cheats.custom_stud_value, 0, 9999999},
+    {"Custom Studs", 1, &g_cheats.custom_stud_value, 0, 999999999},
     {"Stud Magnet", 0, NULL},
     {"Score Multiplier", 1, &g_cheats.score_mult, 1, 10},
 };
