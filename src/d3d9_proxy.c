@@ -167,12 +167,11 @@ static void update_fps(void) {
     if (now - g_fps_t >= 1000) { g_fps = g_fc; g_fc = 0; g_fps_t = now; }
 }
 
+static int g_sw = 1280, g_sh = 720;
+
 static void render_menu(IDirect3DDevice9 *d) {
     if (!g_menu_open || !g_font || !g_font_small) return;
-    D3DPRESENT_PARAMETERS pp;
-    d->GetPresentParameters(&pp);
-    int sw = pp.BackBufferWidth, sh = pp.BackBufferHeight;
-    if (sw < 800) sw = 1280; if (sh < 600) sh = 720;
+    int sw = g_sw, sh = g_sh;
     int mx = (sw - MENU_W) / 2, my = (sh - MENU_H) / 2;
     
     /* Title */
@@ -207,9 +206,7 @@ static void render_menu(IDirect3DDevice9 *d) {
 
 static void render_overlay(IDirect3DDevice9 *d) {
     if (!g_font_small) return;
-    D3DPRESENT_PARAMETERS pp;
-    d->GetPresentParameters(&pp);
-    int sw = pp.BackBufferWidth; if (sw < 1) sw = 1280;
+    int sw = g_sw; if (sw < 1) sw = 1280;
     
     RECT r = {0, 0, sw, 22};
     g_font_small->DrawTextA(NULL, MOD_NAME " " MOD_VER " | F1: Menu | F2: Debug",
@@ -224,9 +221,7 @@ static void render_overlay(IDirect3DDevice9 *d) {
 
 static void render_debug(IDirect3DDevice9 *d) {
     if (!g_cheats.show_debug || !g_font_small) return;
-    D3DPRESENT_PARAMETERS pp;
-    d->GetPresentParameters(&pp);
-    int sw = pp.BackBufferWidth, sh = pp.BackBufferHeight;
+    int sw = g_sw, sh = g_sh;
     int pw = 360, px = sw - pw - 10, py = 30;
     
     RECT tr = {px, py, px+pw, py+20};
@@ -316,7 +311,8 @@ static HRESULT (WINAPI *real_CreateDevice)(IDirect3D9*, UINT, D3DDEVTYPE, HWND,
 static HRESULT WINAPI hk_CreateDevice(IDirect3D9 *d3d, UINT Adapter, D3DDEVTYPE Type,
                                        HWND hWnd, DWORD Flags, D3DPRESENT_PARAMETERS *pp,
                                        IDirect3DDevice9 **ppDev) {
-    LOG("CreateDevice: %dx%d windowed=%d", pp->BackBufferWidth, pp->BackBufferHeight, pp->Windowed);
+    g_sw = pp->BackBufferWidth; g_sh = pp->BackBufferHeight;
+    LOG("CreateDevice: %dx%d windowed=%d", g_sw, g_sh, pp->Windowed);
     HRESULT hr = real_CreateDevice(d3d, Adapter, Type, hWnd, Flags, pp, ppDev);
     if (SUCCEEDED(hr) && ppDev && *ppDev) {
         LOG("Device: %p", *ppDev);
@@ -353,8 +349,8 @@ extern "C" __declspec(dllexport) IDirect3D9* WINAPI Direct3DCreate9(UINT sdk) {
 }
 
 /* Forward other exports */
-extern "C" __declspec(dllexport) HRESULT WINAPI Direct3DCreate9Ex(UINT sdk, void **ex) {
-    typedef HRESULT (WINAPI *fn)(UINT, void**);
+extern "C" __declspec(dllexport) HRESULT WINAPI Direct3DCreate9Ex(UINT sdk, IDirect3D9Ex **ex) {
+    typedef HRESULT (WINAPI *fn)(UINT, IDirect3D9Ex**);
     fn f = NULL;
     char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
     HMODULE h = GetModuleHandleA(path); if (h) f = (fn)GetProcAddress(h, "Direct3DCreate9Ex");
