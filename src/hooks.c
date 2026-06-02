@@ -1,0 +1,303 @@
+#include "hooks.h"
+#include "utils.h"
+#include "cheats.h"
+#include "menu.h"
+#include "input.h"
+
+static HWND g_game_hwnd = NULL;
+static WNDPROC g_orig_wndproc = NULL;
+static int g_wndproc_blocked = 0;
+
+static HRESULT (WINAPI *orig_EndScene)(IDirect3DDevice9*) = NULL;
+static void **g_fake_vt = NULL;
+static HRESULT (WINAPI *orig_Reset)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*) = NULL;
+
+static int g_time_hooks_installed = 0;
+
+DWORD (WINAPI *real_GetTickCount)(void) = NULL;
+BOOL (WINAPI *real_QueryPerformanceCounter)(LARGE_INTEGER*) = NULL;
+DWORD g_freeze_tick = 0;
+LONGLONG g_freeze_perf = 0;
+
+void time_freeze_snapshot(void) {
+    g_freeze_tick = real_GetTickCount ? real_GetTickCount() : GetTickCount();
+    LARGE_INTEGER li;
+    if (real_QueryPerformanceCounter ? real_QueryPerformanceCounter(&li) : QueryPerformanceCounter(&li)) {
+        g_freeze_perf = li.QuadPart;
+    }
+}
+
+static DWORD WINAPI hk_GetTickCount(void) {
+    if (g_cheats.time_freeze) return g_freeze_tick;
+    return real_GetTickCount();
+}
+
+static BOOL WINAPI hk_QueryPerformanceCounter(LARGE_INTEGER *lpCount) {
+    if (g_cheats.time_freeze && lpCount) {
+        lpCount->QuadPart = g_freeze_perf;
+        return TRUE;
+    }
+    return real_QueryPerformanceCounter(lpCount);
+}
+
+void install_time_hooks(void) {
+    if (g_time_hooks_installed) return;
+    hook_iat_function("kernel32.dll", "GetTickCount", (void*)hk_GetTickCount, (void**)&real_GetTickCount);
+    hook_iat_function("kernel32.dll", "QueryPerformanceCounter", (void*)hk_QueryPerformanceCounter, (void**)&real_QueryPerformanceCounter);
+    g_time_hooks_installed = 1;
+}
+
+static LRESULT CALLBACK hk_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (g_menu_open) {
+        if (msg == WM_KEYDOWN || msg == WM_KEYUP ||
+            msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP ||
+            msg == WM_CHAR || msg == WM_DEADCHAR) {
+            g_wndproc_blocked++;
+            if (g_wndproc_blocked <= 5) {
+                LOG("WndProc blocked msg=%04X vk=%d", msg, (int)wParam);
+            }
+            return 0;
+        }
+    }
+    if (g_orig_wndproc) {
+        return CallWindowProc(g_orig_wndproc, hwnd, msg, wParam, lParam);
+    }
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+static void hook_window(HWND hwnd) {
+    if (!hwnd || g_orig_wndproc) return;
+    g_orig_wndproc = (WNDPROC)GetWindowLongPtr(hwnd, GWLP_WNDPROC);
+    if (g_orig_wndproc) {
+        SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)hk_wndproc);
+        LOG("Window subclassed: hwnd=%p oldproc=%p", hwnd, g_orig_wndproc);
+        PostMessage(hwnd, WM_NULL, 0, 0);
+    }
+}
+
+static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
+    menu_increment_frame();
+    if (!g_dev) { g_dev = d; LOG("Device acquired"); }
+
+    D3DVIEWPORT9 vp;
+    if (SUCCEEDED(d->GetViewport(&vp))) {
+        g_sw = vp.Width;
+        g_sh = vp.Height;
+    }
+
+    if (menu_should_be_ready() && !g_dev) {
+        menu_init_fonts(d);
+    }
+    if (menu_should_be_ready() && !g_entity_count) scan_entities();
+
+    if (!g_game_hwnd && g_dev) {
+        D3DDEVICE_CREATION_PARAMETERS cp;
+        if (SUCCEEDED(g_dev->GetCreationParameters(&cp))) {
+            g_game_hwnd = cp.hFocusWindow;
+            if (!g_game_hwnd) g_game_hwnd = cp.hFocusWindow;
+            if (g_game_hwnd) {
+                hook_window(g_game_hwnd);
+            }
+        }
+    }
+
+    if (menu_get_frame() > 10 && menu_get_frame() % 120 == 0) {
+        install_input_hooks();
+    }
+
+    menu_update_input();
+    update_cheats();
+    menu_render_overlay(d);
+    menu_render_debug(d);
+    menu_render(d);
+
+    return orig_EndScene(d);
+}
+
+static HRESULT WINAPI hk_Reset(IDirect3DDevice9 *d, D3DPRESENT_PARAMETERS *pp) {
+    menu_release_fonts();
+
+    g_sw = pp->BackBufferWidth;
+    g_sh = pp->BackBufferHeight;
+    LOG("Reset: %dx%d windowed=%d", g_sw, g_sh, pp->Windowed);
+
+    return orig_Reset(d, pp);
+}
+
+void hook_device(IDirect3DDevice9 *dev) {
+    if (!dev || orig_EndScene) return;
+    void **vt = *(void***)dev;
+    if (!vt) return;
+
+    size_t sz = 512 * sizeof(void*);
+    g_fake_vt = (void**)VirtualAlloc(NULL, sz, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!g_fake_vt) return;
+
+    memcpy(g_fake_vt, vt, sz);
+    orig_EndScene = (HRESULT (WINAPI *)(IDirect3DDevice9*))g_fake_vt[42];
+    g_fake_vt[42] = (void*)hk_EndScene;
+
+    orig_Reset = (HRESULT (WINAPI *)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*))g_fake_vt[16];
+    g_fake_vt[16] = (void*)hk_Reset;
+
+    DWORD old;
+    VirtualProtect(dev, sizeof(void*), PAGE_READWRITE, &old);
+    *(void***)dev = g_fake_vt;
+    VirtualProtect(dev, sizeof(void*), old, &old);
+
+    LOG("Hooked! vtable copied: %d entries", 512);
+}
+
+static BOOL (WINAPI *real_PeekMessageA)(LPMSG, HWND, UINT, UINT, UINT) = NULL;
+
+static BOOL WINAPI hk_PeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin,
+                                    UINT wMsgFilterMax, UINT wRemoveMsg) {
+    BOOL ret = real_PeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
+    if (!ret || !g_menu_open) return ret;
+
+    if (lpMsg->message == WM_KEYDOWN || lpMsg->message == WM_KEYUP ||
+        lpMsg->message == WM_SYSKEYDOWN || lpMsg->message == WM_SYSKEYUP ||
+        lpMsg->message == WM_CHAR || lpMsg->message == WM_DEADCHAR) {
+        if (wRemoveMsg & PM_REMOVE) {
+            lpMsg->message = WM_NULL;
+            lpMsg->wParam = 0;
+            lpMsg->lParam = 0;
+        } else {
+            MSG dummy;
+            real_PeekMessageA(&dummy, hWnd, lpMsg->message, lpMsg->message, PM_REMOVE);
+        }
+        return FALSE;
+    }
+    return ret;
+}
+
+void hook_peekmessage(void) {
+    if (real_PeekMessageA) return;
+    HMODULE hUser32 = GetModuleHandleA("user32.dll");
+    if (!hUser32) return;
+    real_PeekMessageA = (BOOL (WINAPI *)(LPMSG, HWND, UINT, UINT, UINT))
+        GetProcAddress(hUser32, "PeekMessageA");
+    if (!real_PeekMessageA) return;
+
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    if (!base) return;
+
+    PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)base;
+    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)(base + dos->e_lfanew);
+    PIMAGE_IMPORT_DESCRIPTOR import = (PIMAGE_IMPORT_DESCRIPTOR)(base + nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+
+    while (import->Name) {
+        const char *name = (const char*)(base + import->Name);
+        if (_stricmp(name, "USER32.dll") == 0 || _stricmp(name, "user32.dll") == 0) {
+            PIMAGE_THUNK_DATA thunk = (PIMAGE_THUNK_DATA)(base + import->FirstThunk);
+            while (thunk->u1.Function) {
+                if ((DWORD)thunk->u1.Function == (DWORD)real_PeekMessageA) {
+                    DWORD old;
+                    if (VirtualProtect(&thunk->u1.Function, sizeof(void*), PAGE_READWRITE, &old)) {
+                        thunk->u1.Function = (ULONG_PTR)hk_PeekMessageA;
+                        VirtualProtect(&thunk->u1.Function, sizeof(void*), old, &old);
+                        LOG("PeekMessageA hooked");
+                        return;
+                    }
+                }
+                thunk++;
+            }
+        }
+        import++;
+    }
+}
+
+static BOOL (WINAPI *real_GetMessageA)(LPMSG, HWND, UINT, UINT) = NULL;
+
+static BOOL WINAPI hk_GetMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax) {
+    BOOL ret = real_GetMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax);
+    if (!ret || !g_menu_open) return ret;
+
+    if (lpMsg->message == WM_KEYDOWN || lpMsg->message == WM_KEYUP ||
+        lpMsg->message == WM_SYSKEYDOWN || lpMsg->message == WM_SYSKEYUP ||
+        lpMsg->message == WM_CHAR || lpMsg->message == WM_DEADCHAR) {
+        lpMsg->message = WM_NULL;
+        lpMsg->wParam = 0;
+        lpMsg->lParam = 0;
+        return TRUE;
+    }
+    return ret;
+}
+
+static IDirect3D9* (WINAPI *real_D3DCreate9)(UINT) = NULL;
+static HRESULT (WINAPI *real_CreateDevice)(IDirect3D9*, UINT, D3DDEVTYPE, HWND,
+                                            DWORD, D3DPRESENT_PARAMETERS*, IDirect3DDevice9**) = NULL;
+
+static HRESULT WINAPI hk_CreateDevice(IDirect3D9 *d3d, UINT Adapter, D3DDEVTYPE Type,
+                                       HWND hWnd, DWORD Flags, D3DPRESENT_PARAMETERS *pp,
+                                       IDirect3DDevice9 **ppDev) {
+    g_sw = pp->BackBufferWidth; g_sh = pp->BackBufferHeight;
+    LOG("CreateDevice: %dx%d windowed=%d", g_sw, g_sh, pp->Windowed);
+    HRESULT hr = real_CreateDevice(d3d, Adapter, Type, hWnd, Flags, pp, ppDev);
+    if (SUCCEEDED(hr) && ppDev && *ppDev) {
+        LOG("Device: %p", *ppDev);
+        hook_device(*ppDev);
+    }
+    return hr;
+}
+
+extern "C" __declspec(dllexport) IDirect3D9* WINAPI Direct3DCreate9(UINT sdk) {
+    LOG("Direct3DCreate9(%d)", sdk);
+
+    if (!real_D3DCreate9) {
+        char path[MAX_PATH];
+        GetSystemDirectoryA(path, MAX_PATH);
+        strcat(path, "\\d3d9.dll");
+        HMODULE h = LoadLibraryA(path);
+        if (h) real_D3DCreate9 = (IDirect3D9* (WINAPI *)(UINT))GetProcAddress(h, "Direct3DCreate9");
+    }
+    if (!real_D3DCreate9) return NULL;
+
+    IDirect3D9 *d3d = real_D3DCreate9(sdk);
+    if (!d3d) return NULL;
+
+    void **vt = *(void***)d3d;
+    real_CreateDevice = (HRESULT (WINAPI *)(IDirect3D9*, UINT, D3DDEVTYPE, HWND,
+                                              DWORD, D3DPRESENT_PARAMETERS*, IDirect3DDevice9**))vt[16];
+    DWORD old;
+    VirtualProtect(&vt[16], sizeof(void*), PAGE_READWRITE, &old);
+    vt[16] = (void*)hk_CreateDevice;
+    VirtualProtect(&vt[16], sizeof(void*), old, &old);
+
+    return d3d;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI Direct3DCreate9Ex(UINT sdk, IDirect3D9Ex **ex) {
+    typedef HRESULT (WINAPI *fn)(UINT, IDirect3D9Ex**);
+    fn f = NULL;
+    char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
+    HMODULE h = GetModuleHandleA(path); if (h) f = (fn)GetProcAddress(h, "Direct3DCreate9Ex");
+    return f ? f(sdk, ex) : E_NOTIMPL;
+}
+
+extern "C" __declspec(dllexport) int WINAPI D3DPERF_BeginEvent(DWORD c, const WCHAR *n) {
+    typedef int (WINAPI *fn)(DWORD, const WCHAR*);
+    fn f = NULL;
+    char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
+    HMODULE h = GetModuleHandleA(path); if (h) f = (fn)GetProcAddress(h, "D3DPERF_BeginEvent");
+    return f ? f(c, n) : 0;
+}
+
+extern "C" __declspec(dllexport) int WINAPI D3DPERF_EndEvent(void) {
+    typedef int (WINAPI *fn)(void);
+    fn f = NULL;
+    char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
+    HMODULE h = GetModuleHandleA(path); if (h) f = (fn)GetProcAddress(h, "D3DPERF_EndEvent");
+    return f ? f() : 0;
+}
+
+void hooks_cleanup(void) {
+    if (g_game_hwnd && g_orig_wndproc) {
+        SetWindowLongPtr(g_game_hwnd, GWLP_WNDPROC, (LONG_PTR)g_orig_wndproc);
+        g_orig_wndproc = NULL;
+    }
+    if (g_fake_vt) {
+        VirtualFree(g_fake_vt, 0, MEM_RELEASE);
+        g_fake_vt = NULL;
+    }
+}
