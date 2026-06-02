@@ -15,9 +15,9 @@ void install_time_hooks(void);
 void time_freeze_snapshot(void);
 
 void install_level_editor_hook(void);
+void install_v12_hook(void);
 void* get_level_editor(void);
 void le_send_message(int msg_id, void *data);
-void le_call_vfunc(int index, void *arg1, void *arg2);
 void hooks_cleanup(void);
 
 #endif

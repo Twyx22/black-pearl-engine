@@ -285,29 +285,68 @@ void* get_level_editor(void) {
     return g_level_editor;
 }
 
+/* vfunction12 debug hook */
+typedef void (__fastcall *V12Fn_t)(void* thisptr, void* edx,
+                                    int* msg_struct, int* msg_id_ptr, int unused);
+static V12Fn_t real_v12 = NULL;
+static int g_v12_log_count = 0;
+static int g_v12_our_call = 0;
+
+static void __fastcall hk_v12(void* thisptr, void* edx,
+                               int* msg_struct, int* msg_id_ptr, int unused)
+{
+    int ours = g_v12_our_call;
+    if (g_v12_log_count < 60 || ours) {
+        g_v12_log_count++;
+        int msg_id = msg_id_ptr ? *msg_id_ptr : -1;
+        int cond = msg_struct ? msg_struct[2] : -1;
+        void* data = msg_struct ? (void*)msg_struct[3] : NULL;
+        LOG("v12(this=%p, msg_id=0x%X, cond=%d, data=%p, u=%d)%s",
+            thisptr, msg_id, cond, data, unused, ours ? " <<< OUR CALL" : "");
+
+        DWORD base = (DWORD)GetModuleHandleA(NULL);
+        int dat_00f56210 = *(int*)(base + 0xf56210);
+        int dat_00f66bc4 = *(int*)(base + 0xf66bc4);
+        LOG("  DAT_00f56210=%p DAT_00f66bc4=%p", (void*)dat_00f56210, (void*)dat_00f66bc4);
+        if (dat_00f56210 && msg_id == 0xb22) {
+            int count = 0;
+            for (int i = 0; i < 300; i++) {
+                int e = *(int*)(dat_00f56210 + 8 + i * 4);
+                if (e) count++;
+            }
+            LOG("  entities_in_table=%d/300", count);
+        }
+    }
+    return real_v12(thisptr, edx, msg_struct, msg_id_ptr, unused);
+}
+
+void install_v12_hook(void) {
+    if (real_v12) return;
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    LPVOID target = (LPVOID)(base + 0x580be0);
+    if (MH_CreateHook(target, (LPVOID)hk_v12, (void**)&real_v12) == MH_OK) {
+        MH_EnableHook(target);
+        LOG("v12 hook installed at %p (real=%p)", target, real_v12);
+    } else {
+        LOG("v12 hook FAILED at %p", target);
+    }
+}
+
 void le_send_message(int msg_id, void *data) {
     void *le = g_level_editor;
     if (!le) { LOG("le_send_message: no LevelEditor"); return; }
     void **vt = *(void***)le;
     if (!vt) { LOG("le_send_message: no vtable"); return; }
 
-    /* msg struct: { unused, unused, condition=0, data_ptr } */
     int msg[4] = { 0, 0, 0, (int)data };
 
-    /*
-     * vfunction12 is __thiscall with 3 stack params:
-     *   void __thiscall(LevelEditor *this, int *msg_struct, int *msg_id_ptr, int unused)
-     * - [EBP+0x8] = msg_struct[2] must be 0
-     * - [ESP+0x10] = msg_id_ptr is DEREFERENCED (*msg_id_ptr = message ID)
-     * - RET 0xc cleans 3 params (12 bytes)
-     *
-     * Use __fastcall wrapper: ECX=thisptr, EDX=garbage, then stack params.
-     */
+    g_v12_our_call = 1;
     typedef void (__fastcall *fn_t)(void* thisptr, void* edx,
                                      int* msg_struct, int* msg_id_ptr, int unused);
     fn_t fn = (fn_t)vt[11];
     fn(le, NULL, msg, &msg_id, 0);
-    LOG("le_send_message(id=0x%X, data=%p)", msg_id, data);
+    g_v12_our_call = 0;
+    LOG("le_send_message(id=0x%X, data=%p) OK", msg_id, data);
 }
 
 void hooks_cleanup(void) {
