@@ -19,7 +19,6 @@ BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID reserved) {
             hook_peekmessage();
             install_time_hooks();
             install_level_editor_hook();
-            install_v12_hook();
             MH_EnableHook(MH_ALL_HOOKS);
             return TRUE;
         case DLL_PROCESS_DETACH:

@@ -265,6 +265,7 @@ static void* __fastcall hk_LevelEditor_ctor(void* thisptr, void* edx) {
     void* ret = real_LevelEditor_ctor(thisptr, edx);
     g_level_editor = ret;
     LOG("LevelEditor::LevelEditor(this=%p) -> %p", thisptr, ret);
+    install_v12_hook();
     return ret;
 }
 
@@ -285,10 +286,18 @@ void* get_level_editor(void) {
     return g_level_editor;
 }
 
-/* vfunction12 debug hook
- * Signature: void __thiscall(LevelEditor *this, int *msg_struct, int *msg_id_ptr, int unused)
- * ECX=this, [ESP+4]=msg_struct, [ESP+8]=msg_id_ptr, [ESP+12]=unused
- * Callee cleans: RET 0xc */
+/* vfunction12 debug hook via vtable swap
+ * LevelEditor vtable (RVA 0xBC105C), entry 11 (index 11) = vfunction12
+ * Called as: __thiscall(LevelEditor *this, int *msg_struct, int *msg_id_ptr, int unused)
+ * ECX=this, [ESP+4]=msg_struct, [ESP+8]=msg_id_ptr, [ESP+12]=unused, RET 0xc
+ * msg_struct layout: [header=0, unknown=0, cond, data_ptr]
+ *   cond = 0 → no-op (function returns immediately)
+ *   cond ≠ 0 → processes msg_id from *msg_id_ptr
+ *
+ * NOTE: All offsets here are RVAs (Ghidra_address - ImageBase 0x400000).
+ *   Ghidra absolute addresses (0x00XXXXXX) need 0x400000 subtracted. */
+#define DAT_ENTITY_TABLE  0xB56210
+
 typedef void (__thiscall *V12Fn_t)(void* thisptr, int* msg_struct, int* msg_id_ptr, int unused);
 static V12Fn_t real_v12 = NULL;
 static int g_v12_log_count = 0;
@@ -307,14 +316,12 @@ static void __thiscall hk_v12(void* thisptr, int* msg_struct,
             thisptr, msg_id, cond, data, unused, ours ? " <<< OUR CALL" : "");
 
         DWORD base = (DWORD)GetModuleHandleA(NULL);
-        int dat_00f56210 = *(int*)(base + 0xf56210);
-        int dat_00f66bc4 = *(int*)(base + 0xf66bc4);
-        LOG("  DAT_00f56210=%p DAT_00f66bc4=%p", (void*)dat_00f56210, (void*)dat_00f66bc4);
-        if (dat_00f56210 && msg_id == 0xb22) {
+        void *et = *(void**)(base + DAT_ENTITY_TABLE);
+        LOG("  DAT_entity_table=%p", et);
+        if (et && msg_id == 0xb22) {
             int count = 0;
             for (int i = 0; i < 300; i++) {
-                int e = *(int*)(dat_00f56210 + 8 + i * 4);
-                if (e) count++;
+                if (*(int*)((int)et + 8 + i * 4)) count++;
             }
             LOG("  entities_in_table=%d/300", count);
         }
@@ -324,14 +331,35 @@ static void __thiscall hk_v12(void* thisptr, int* msg_struct,
 
 void install_v12_hook(void) {
     if (real_v12) return;
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    LPVOID target = (LPVOID)(base + 0x580be0);
-    if (MH_CreateHook(target, (LPVOID)hk_v12, (void**)&real_v12) == MH_OK) {
-        MH_EnableHook(target);
-        LOG("v12 hook installed at %p (real=%p)", target, real_v12);
-    } else {
-        LOG("v12 hook FAILED at %p", target);
-    }
+    void *le = g_level_editor;
+    if (!le) { LOG("v12 hook: no LevelEditor yet"); return; }
+
+    /* Read the LevelEditor's vtable pointer */
+    void **orig_vt = *(void***)le;
+    LOG("v12 hook: LE=%p orig_vt=%p", le, orig_vt);
+
+    /* Read the current vfunction12 address from the vtable */
+    real_v12 = (V12Fn_t)orig_vt[11];
+    LOG("v12 hook: current vtable[11]=%p", real_v12);
+
+    /* Allocate a new vtable (12 entries, copied from original) */
+    void **new_vt = (void**)VirtualAlloc(NULL, 16 * sizeof(void*),
+                                          MEM_COMMIT | MEM_RESERVE,
+                                          PAGE_READWRITE);
+    if (!new_vt) { LOG("v12 hook: VirtualAlloc failed"); return; }
+    memcpy(new_vt, orig_vt, 12 * sizeof(void*));
+
+    /* Overwrite entry 11 with our hook */
+    new_vt[11] = (void*)hk_v12;
+
+    /* Patch the LevelEditor's vtable pointer */
+    DWORD old;
+    VirtualProtect(le, sizeof(void*), PAGE_READWRITE, &old);
+    *(void***)le = new_vt;
+    VirtualProtect(le, sizeof(void*), old, &old);
+
+    LOG("v12 vtable swap done: orig_vt=%p new_vt=%p real_v12=%p hk_v12=%p",
+        orig_vt, new_vt, real_v12, hk_v12);
 }
 
 void le_send_message(int msg_id, void *data) {
@@ -340,7 +368,7 @@ void le_send_message(int msg_id, void *data) {
     void **vt = *(void***)le;
     if (!vt) { LOG("le_send_message: no vtable"); return; }
 
-    int msg[4] = { 0, 0, 0, (int)data };
+    int msg[4] = { 0, 0, 1, (int)data };
 
     g_v12_our_call = 1;
     typedef void (__thiscall *fn_t)(void* thisptr, int* msg_struct,
