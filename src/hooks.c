@@ -272,7 +272,6 @@ static LRESULT CALLBACK hk_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             return 0;
         }
     }
-    }
 
     // 3. Menu closed or non-input message: forward to original WndProc
     if (g_orig_wndproc) {
@@ -894,27 +893,16 @@ void render_editor_overlay(IDirect3DDevice9 *d) {
         d->SetFVF(old_fvf);
     }
 
-    /* Draw "EDITOR MODE" text */
-    ID3DXFont *tmp_font = NULL;
-    ID3DXFont *font = g_font_small;
-    if (!font) {
-        D3DXCreateFontA(d, 28, 0, FW_BOLD, 0, FALSE, DEFAULT_CHARSET,
-                       OUT_DEFAULT_PRECIS, DEFAULT_QUALITY,
-                       DEFAULT_PITCH | FF_DONTCARE, "Arial", &tmp_font);
-        font = tmp_font;
-    }
-
-    if (font) {
+    /* Draw "EDITOR MODE" text using ImGui */
+    if (g_imgui_ready) {
+        ImDrawList *dl = ImGui::GetForegroundDrawList();
         char buf[128];
         int y = sh - 28;
         snprintf(buf, sizeof(buf), "EDITOR | Entities: %d | Selected: %d  |  WASD: Move  RMB: Look  E/Q: Up/Down  SHIFT: Fast",
                  g_editor_entity_count, g_selected_count);
-        RECT tr = {0, 8, sw-10, 40};
-        font->DrawTextA(NULL, "EDITOR MODE", -1, &tr, DT_RIGHT, 0xFFFF4444);
-        RECT br = {10, y, sw-10, sh-8};
-        font->DrawTextA(NULL, buf, -1, &br, DT_LEFT, 0xFFFF4444);
+        dl->AddText(ImVec2(sw - 10 - 200, 8), 0xFFFF4444, "EDITOR MODE");
+        dl->AddText(ImVec2(10, y), 0xFFFF4444, buf);
     }
-    if (tmp_font) tmp_font->Release();
 
     /* Draw 3D gizmo and selection indicators */
     if (!g_camera_valid) return;

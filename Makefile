@@ -1,6 +1,6 @@
 CXX = i686-w64-mingw32-g++
 CXXFLAGS = -O2 -s -static-libgcc -static-libstdc++ -DIMGUI_IMPL_WIN32_DISABLE_GAMEPAD
-LDFLAGS = -Wl,--enable-stdcall-fixup -static -lwinmm -lpsapi -ld3d9 -ldinput8 -ldxguid -lgdi32 -ldwmapi
+LDFLAGS = -Wl,--enable-stdcall-fixup -static -ld3dx9 -lwinmm -lpsapi -ld3d9 -ldinput8 -ldxguid -lgdi32 -ldwmapi
 INCLUDES = -Isrc -Ilib/minhook/include -Ilib/imgui -Ilib/imgui/backends
 
 SRCS = src/d3d9_proxy.c src/utils.c src/cheats.c src/menu.c src/hooks.c src/input.c src/config_loader.c
