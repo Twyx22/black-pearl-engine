@@ -4,6 +4,7 @@
 #include "menu.h"
 #include "hooks.h"
 #include "config.h"
+#include <MinHook.h>
 
 int g_key_states[256] = {0};
 int g_keys[256] = {0};
@@ -141,7 +142,12 @@ void install_input_hooks(void) {
 
     LOG("Installing input hooks (attempt %d)...", g_input_hook_attempts);
 
-    hook_iat_function_all("dinput8.dll", "DirectInput8Create", (void*)hk_DirectInput8Create, (void**)&real_DirectInput8Create);
+    if (!real_DirectInput8Create) {
+        if (MH_CreateHookApi(L"dinput8.dll", "DirectInput8Create", (LPVOID)hk_DirectInput8Create, (void**)&real_DirectInput8Create) == MH_OK) {
+            MH_EnableHook(MH_ALL_HOOKS);
+            LOG("DirectInput8Create hook via MinHook");
+        }
+    }
 
     if (!g_kb_hook && g_hinst) {
         DWORD tid = GetCurrentThreadId();

@@ -3,6 +3,7 @@
 #include "cheats.h"
 #include "menu.h"
 #include "input.h"
+#include <MinHook.h>
 
 static HWND g_game_hwnd = NULL;
 static WNDPROC g_orig_wndproc = NULL;
@@ -42,9 +43,14 @@ static BOOL WINAPI hk_QueryPerformanceCounter(LARGE_INTEGER *lpCount) {
 
 void install_time_hooks(void) {
     if (g_time_hooks_installed) return;
-    hook_iat_function("kernel32.dll", "GetTickCount", (void*)hk_GetTickCount, (void**)&real_GetTickCount);
-    hook_iat_function("kernel32.dll", "QueryPerformanceCounter", (void*)hk_QueryPerformanceCounter, (void**)&real_QueryPerformanceCounter);
+    if (MH_CreateHookApi(L"kernel32.dll", "GetTickCount", (LPVOID)hk_GetTickCount, (void**)&real_GetTickCount) != MH_OK) {
+        LOG("GetTickCount hook failed");
+    }
+    if (MH_CreateHookApi(L"kernel32.dll", "QueryPerformanceCounter", (LPVOID)hk_QueryPerformanceCounter, (void**)&real_QueryPerformanceCounter) != MH_OK) {
+        LOG("QueryPerformanceCounter hook failed");
+    }
     g_time_hooks_installed = 1;
+    LOG("Time hooks installed via MinHook");
 }
 
 static LRESULT CALLBACK hk_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -72,6 +78,36 @@ static void hook_window(HWND hwnd) {
         SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)hk_wndproc);
         LOG("Window subclassed: hwnd=%p oldproc=%p", hwnd, g_orig_wndproc);
         PostMessage(hwnd, WM_NULL, 0, 0);
+    }
+}
+
+static BOOL (WINAPI *real_PeekMessageA)(LPMSG, HWND, UINT, UINT, UINT) = NULL;
+
+static BOOL WINAPI hk_PeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin,
+                                    UINT wMsgFilterMax, UINT wRemoveMsg) {
+    BOOL ret = real_PeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
+    if (!ret || !g_menu_open) return ret;
+
+    if (lpMsg->message == WM_KEYDOWN || lpMsg->message == WM_KEYUP ||
+        lpMsg->message == WM_SYSKEYDOWN || lpMsg->message == WM_SYSKEYUP ||
+        lpMsg->message == WM_CHAR || lpMsg->message == WM_DEADCHAR) {
+        if (wRemoveMsg & PM_REMOVE) {
+            lpMsg->message = WM_NULL;
+            lpMsg->wParam = 0;
+            lpMsg->lParam = 0;
+        } else {
+            MSG dummy;
+            real_PeekMessageA(&dummy, hWnd, lpMsg->message, lpMsg->message, PM_REMOVE);
+        }
+        return FALSE;
+    }
+    return ret;
+}
+
+void hook_peekmessage(void) {
+    if (real_PeekMessageA) return;
+    if (MH_CreateHookApi(L"user32.dll", "PeekMessageA", (LPVOID)hk_PeekMessageA, (void**)&real_PeekMessageA) != MH_OK) {
+        LOG("PeekMessageA hook failed");
     }
 }
 
@@ -148,82 +184,6 @@ void hook_device(IDirect3DDevice9 *dev) {
     LOG("Hooked! vtable copied: %d entries", 512);
 }
 
-static BOOL (WINAPI *real_PeekMessageA)(LPMSG, HWND, UINT, UINT, UINT) = NULL;
-
-static BOOL WINAPI hk_PeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin,
-                                    UINT wMsgFilterMax, UINT wRemoveMsg) {
-    BOOL ret = real_PeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
-    if (!ret || !g_menu_open) return ret;
-
-    if (lpMsg->message == WM_KEYDOWN || lpMsg->message == WM_KEYUP ||
-        lpMsg->message == WM_SYSKEYDOWN || lpMsg->message == WM_SYSKEYUP ||
-        lpMsg->message == WM_CHAR || lpMsg->message == WM_DEADCHAR) {
-        if (wRemoveMsg & PM_REMOVE) {
-            lpMsg->message = WM_NULL;
-            lpMsg->wParam = 0;
-            lpMsg->lParam = 0;
-        } else {
-            MSG dummy;
-            real_PeekMessageA(&dummy, hWnd, lpMsg->message, lpMsg->message, PM_REMOVE);
-        }
-        return FALSE;
-    }
-    return ret;
-}
-
-void hook_peekmessage(void) {
-    if (real_PeekMessageA) return;
-    HMODULE hUser32 = GetModuleHandleA("user32.dll");
-    if (!hUser32) return;
-    real_PeekMessageA = (BOOL (WINAPI *)(LPMSG, HWND, UINT, UINT, UINT))
-        GetProcAddress(hUser32, "PeekMessageA");
-    if (!real_PeekMessageA) return;
-
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    if (!base) return;
-
-    PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)base;
-    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)(base + dos->e_lfanew);
-    PIMAGE_IMPORT_DESCRIPTOR import = (PIMAGE_IMPORT_DESCRIPTOR)(base + nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-
-    while (import->Name) {
-        const char *name = (const char*)(base + import->Name);
-        if (_stricmp(name, "USER32.dll") == 0 || _stricmp(name, "user32.dll") == 0) {
-            PIMAGE_THUNK_DATA thunk = (PIMAGE_THUNK_DATA)(base + import->FirstThunk);
-            while (thunk->u1.Function) {
-                if ((DWORD)thunk->u1.Function == (DWORD)real_PeekMessageA) {
-                    DWORD old;
-                    if (VirtualProtect(&thunk->u1.Function, sizeof(void*), PAGE_READWRITE, &old)) {
-                        thunk->u1.Function = (ULONG_PTR)hk_PeekMessageA;
-                        VirtualProtect(&thunk->u1.Function, sizeof(void*), old, &old);
-                        LOG("PeekMessageA hooked");
-                        return;
-                    }
-                }
-                thunk++;
-            }
-        }
-        import++;
-    }
-}
-
-static BOOL (WINAPI *real_GetMessageA)(LPMSG, HWND, UINT, UINT) = NULL;
-
-static BOOL WINAPI hk_GetMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax) {
-    BOOL ret = real_GetMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax);
-    if (!ret || !g_menu_open) return ret;
-
-    if (lpMsg->message == WM_KEYDOWN || lpMsg->message == WM_KEYUP ||
-        lpMsg->message == WM_SYSKEYDOWN || lpMsg->message == WM_SYSKEYUP ||
-        lpMsg->message == WM_CHAR || lpMsg->message == WM_DEADCHAR) {
-        lpMsg->message = WM_NULL;
-        lpMsg->wParam = 0;
-        lpMsg->lParam = 0;
-        return TRUE;
-    }
-    return ret;
-}
-
 static IDirect3D9* (WINAPI *real_D3DCreate9)(UINT) = NULL;
 static HRESULT (WINAPI *real_CreateDevice)(IDirect3D9*, UINT, D3DDEVTYPE, HWND,
                                             DWORD, D3DPRESENT_PARAMETERS*, IDirect3DDevice9**) = NULL;
@@ -292,6 +252,9 @@ extern "C" __declspec(dllexport) int WINAPI D3DPERF_EndEvent(void) {
 }
 
 void hooks_cleanup(void) {
+    MH_DisableHook(MH_ALL_HOOKS);
+    MH_Uninitialize();
+
     if (g_game_hwnd && g_orig_wndproc) {
         SetWindowLongPtr(g_game_hwnd, GWLP_WNDPROC, (LONG_PTR)g_orig_wndproc);
         g_orig_wndproc = NULL;

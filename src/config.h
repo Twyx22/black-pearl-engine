@@ -45,19 +45,25 @@
 
 /* --- Jump Physics --- */
 
-/* Float addresses for gravity and jump force (contiguous structure) */
-#define GRAVITY_ADDR            0x00E24C48
-#define JUMP_FORCE_ADDR         0x00E24C4C
+/* Instruction offsets (from module base) for the vertical velocity calculation.
+   Pattern: fld [esi+0xFB0]; fmul [esi+0xD78]; fadd [esi+0x28]; fstp [esi+0x2FC]
 
-/* Default physics values */
-#define GRAVITY_DEFAULT         -20.0f
-#define JUMP_FORCE_DEFAULT      10.0f
+   First instance (with intervening mov): _LEGOPirates.exe+3BC67B
+   Second instance (pure math): _LEGOPirates.exe+3BC818
 
-/* Super Jump: high jump force */
-#define JUMP_FORCE_SUPER        50.0f
+   We redirect the fmul to our own float for moon jump,
+   and the fld to our own float for super jump. */
 
-/* Moon Jump: low gravity */
-#define GRAVITY_MOON            -2.0f
+#define JUMP_FLD_OFFSET1        0x3BC67B   /* fld [esi+0xFB0] - first instance */
+#define JUMP_FLD_OFFSET2        0x3BC818   /* fld [esi+0xFB0] - second instance */
+#define JUMP_FMUL_OFFSET1       0x3BC688   /* fmul [esi+0xD78] - first instance */
+#define JUMP_FMUL_OFFSET2       0x3BC81E   /* fmul [esi+0xD78] - second instance */
+
+/* Moon Jump: low gravity multiplier */
+#define GRAVITY_MULT_MOON       0.02f
+
+/* Super Jump: high jump force value */
+#define JUMP_FORCE_SUPER        100.0f
 
 /* --- Entity Scanner --- */
 

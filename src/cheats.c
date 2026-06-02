@@ -162,43 +162,91 @@ void remove_super_speed(void) {
     }
 }
 
-static float g_gravity_orig = GRAVITY_DEFAULT;
-static float g_jump_force_orig = JUMP_FORCE_DEFAULT;
-
-void apply_super_jump(void) {
-    DWORD old;
-    if (VirtualProtect((LPVOID)JUMP_FORCE_ADDR, 4, PAGE_READWRITE, &old)) {
-        *(float*)JUMP_FORCE_ADDR = JUMP_FORCE_SUPER;
-        VirtualProtect((LPVOID)JUMP_FORCE_ADDR, 4, old, &old);
-        LOG("Super Jump: force set to %.1f", JUMP_FORCE_SUPER);
-    }
-}
-
-void remove_super_jump(void) {
-    DWORD old;
-    if (VirtualProtect((LPVOID)JUMP_FORCE_ADDR, 4, PAGE_READWRITE, &old)) {
-        *(float*)JUMP_FORCE_ADDR = g_jump_force_orig;
-        VirtualProtect((LPVOID)JUMP_FORCE_ADDR, 4, old, &old);
-        LOG("Super Jump: restored to %.1f", g_jump_force_orig);
-    }
-}
+/* Moon Jump: patch fmul [esi+0xD78] → fmul [our_gravity_float]
+   to control the gravity multiplier for all entities. */
+static float g_moon_mult = GRAVITY_MULT_MOON;
+static unsigned char g_fmul1_orig[6] = {0};
+static unsigned char g_fmul2_orig[6] = {0};
+static int g_moon_patched = 0;
 
 void apply_moon_jump(void) {
+    if (g_moon_patched) return;
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    DWORD addr1 = base + JUMP_FMUL_OFFSET1;
+    DWORD addr2 = base + JUMP_FMUL_OFFSET2;
+
+    /* Save original bytes */
+    memcpy(g_fmul1_orig, (void*)addr1, 6);
+    memcpy(g_fmul2_orig, (void*)addr2, 6);
+
+    /* Build patch: D8 0D [addr] = fmul dword ptr [addr] (absolute) */
+    unsigned char patch[6];
+    patch[0] = 0xD8; patch[1] = 0x0D;
+    *(DWORD*)&patch[2] = (DWORD)&g_moon_mult;
+
     DWORD old;
-    if (VirtualProtect((LPVOID)GRAVITY_ADDR, 4, PAGE_READWRITE, &old)) {
-        *(float*)GRAVITY_ADDR = GRAVITY_MOON;
-        VirtualProtect((LPVOID)GRAVITY_ADDR, 4, old, &old);
-        LOG("Moon Jump: gravity set to %.1f", GRAVITY_MOON);
+    if (VirtualProtect((LPVOID)addr1, 6, PAGE_EXECUTE_READWRITE, &old)) {
+        memcpy((void*)addr1, patch, 6);
+        VirtualProtect((LPVOID)addr1, 6, old, &old);
     }
+    if (VirtualProtect((LPVOID)addr2, 6, PAGE_EXECUTE_READWRITE, &old)) {
+        memcpy((void*)addr2, patch, 6);
+        VirtualProtect((LPVOID)addr2, 6, old, &old);
+    }
+    g_moon_patched = 1;
+    LOG("Moon Jump: fmul redirected to %.2f", g_moon_mult);
 }
 
 void remove_moon_jump(void) {
+    if (!g_moon_patched) return;
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    patch_mem(base + JUMP_FMUL_OFFSET1, g_fmul1_orig, 6);
+    patch_mem(base + JUMP_FMUL_OFFSET2, g_fmul2_orig, 6);
+    g_moon_patched = 0;
+    LOG("Moon Jump: unpatched");
+}
+
+/* Super Jump: patch fld [esi+0xFB0] → fld [our_force_float]
+   to override the jump/velocity input. */
+static float g_super_jump_force = JUMP_FORCE_SUPER;
+static unsigned char g_fld1_orig[6] = {0};
+static unsigned char g_fld2_orig[6] = {0};
+static int g_super_jump_patched = 0;
+
+void apply_super_jump(void) {
+    if (g_super_jump_patched) return;
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    DWORD addr1 = base + JUMP_FLD_OFFSET1;
+    DWORD addr2 = base + JUMP_FLD_OFFSET2;
+
+    memcpy(g_fld1_orig, (void*)addr1, 6);
+    memcpy(g_fld2_orig, (void*)addr2, 6);
+
+    /* Build patch: D9 05 [addr] = fld dword ptr [addr] (absolute) */
+    unsigned char patch[6];
+    patch[0] = 0xD9; patch[1] = 0x05;
+    *(DWORD*)&patch[2] = (DWORD)&g_super_jump_force;
+
     DWORD old;
-    if (VirtualProtect((LPVOID)GRAVITY_ADDR, 4, PAGE_READWRITE, &old)) {
-        *(float*)GRAVITY_ADDR = g_gravity_orig;
-        VirtualProtect((LPVOID)GRAVITY_ADDR, 4, old, &old);
-        LOG("Moon Jump: restored to %.1f", g_gravity_orig);
+    if (VirtualProtect((LPVOID)addr1, 6, PAGE_EXECUTE_READWRITE, &old)) {
+        memcpy((void*)addr1, patch, 6);
+        VirtualProtect((LPVOID)addr1, 6, old, &old);
     }
+    if (VirtualProtect((LPVOID)addr2, 6, PAGE_EXECUTE_READWRITE, &old)) {
+        memcpy((void*)addr2, patch, 6);
+        VirtualProtect((LPVOID)addr2, 6, old, &old);
+    }
+    g_super_jump_patched = 1;
+    LOG("Super Jump: fld redirected to %.1f", g_super_jump_force);
+}
+
+void remove_super_jump(void) {
+    if (!g_super_jump_patched) return;
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    patch_mem(base + JUMP_FLD_OFFSET1, g_fld1_orig, 6);
+    patch_mem(base + JUMP_FLD_OFFSET2, g_fld2_orig, 6);
+    g_super_jump_patched = 0;
+    LOG("Super Jump: unpatched");
 }
 
 const char *g_entities[64];

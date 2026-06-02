@@ -17,8 +17,6 @@ void LOG(const char *fmt, ...);
 void patch_mem(DWORD addr, const void *data, size_t len);
 int find_text_section(DWORD *out_start, DWORD *out_size);
 
-int hook_iat_in_module(HMODULE hMod, const char *dll_name, void *real_fn, void *hook_fn);
-void hook_iat_function_all(const char *dll_name, const char *func_name, void *hook_fn, void **real_fn_out);
-void hook_iat_function(const char *dll_name, const char *func_name, void *hook_fn, void **real_fn);
+
 
 #endif
