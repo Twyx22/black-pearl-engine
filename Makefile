@@ -1,6 +1,6 @@
 CXX = i686-w64-mingw32-g++
 CXXFLAGS = -O2 -s -static-libgcc -static-libstdc++
-LDFLAGS = -Wl,--enable-stdcall-fixup -ld3dx9 -lwinmm
+LDFLAGS = -Wl,--enable-stdcall-fixup -ld3dx9 -lwinmm -lpsapi
 
 all: d3d9.dll
 
