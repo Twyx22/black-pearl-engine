@@ -44,6 +44,7 @@ static Item fun_items[] = {
     {"Moon Jump", 0, &g_cheats.moon_jump},
     {"NoClip", 0, &g_cheats.noclip},
     {"Time Freeze", 0, &g_cheats.time_freeze},
+    {"Speed Mult", 1, &g_cheats.speed_mult, 1, 100},
 };
 static Item visual_items[] = {
     {"FPS Counter", 0, &g_cheats.show_fps},
@@ -80,7 +81,7 @@ static int uw_items_cb(int sel) {
 Tab tabs[] = {
     {"Health", health_items, 4, NULL},
     {"Studs", stud_items, 7, NULL},
-    {"Fun", fun_items, 6, NULL},
+    {"Fun", fun_items, 7, NULL},
     {"Visual", visual_items, 2, NULL},
     {"UltraWide", uw_items, 5, uw_items_cb},
 };

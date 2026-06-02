@@ -3,7 +3,7 @@
 #include "hooks.h"
 #include "config.h"
 
-CheatsState g_cheats = {0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT};
+CheatsState g_cheats = {0, 0, 0, 0, 100, 1, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT};
 
 /* Stud patch: NOP sub ebx,eax and sbb esi,edx at fixed addresses (Cheat Engine found) */
 static unsigned char g_stud_sub_orig[2] = {0};

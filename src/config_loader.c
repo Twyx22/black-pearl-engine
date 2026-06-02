@@ -16,6 +16,7 @@ static ConfigMapping g_map[] = {
     {"super_speed",         &g_cheats.super_speed},
     {"super_jump",          &g_cheats.super_jump},
     {"super_jump_scale",    &g_cheats.super_jump_scale},
+    {"speed_mult",          &g_cheats.speed_mult},
     {"moon_jump",           &g_cheats.moon_jump},
     {"time_freeze",         &g_cheats.time_freeze},
     {"noclip",              &g_cheats.noclip},

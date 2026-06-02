@@ -4,7 +4,7 @@
 #include <windows.h>
 
 typedef struct {
-    int invincible, infinite_studs, super_speed, super_jump, super_jump_scale;
+    int invincible, infinite_studs, super_speed, super_jump, super_jump_scale, speed_mult;
     int moon_jump, time_freeze, noclip, show_debug, show_fps;
     int score_mult;
     int force_custom_studs;

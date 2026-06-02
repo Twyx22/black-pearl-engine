@@ -28,6 +28,8 @@ DWORD (WINAPI *real_GetTickCount)(void) = NULL;
 BOOL (WINAPI *real_QueryPerformanceCounter)(LARGE_INTEGER*) = NULL;
 DWORD g_freeze_tick = 0;
 LONGLONG g_freeze_perf = 0;
+static DWORD g_speed_ref_tick = 0;
+static LONGLONG g_speed_ref_perf = 0;
 
 void time_freeze_snapshot(void) {
     g_freeze_tick = real_GetTickCount ? real_GetTickCount() : GetTickCount();
@@ -38,16 +40,28 @@ void time_freeze_snapshot(void) {
 }
 
 static DWORD WINAPI hk_GetTickCount(void) {
+    DWORD real = real_GetTickCount();
     if (g_cheats.time_freeze) return g_freeze_tick;
-    return real_GetTickCount();
+    if (g_cheats.speed_mult > 1) {
+        ULONGLONG scaled = g_speed_ref_tick + (ULONGLONG)(real - g_speed_ref_tick) * g_cheats.speed_mult;
+        return (DWORD)(scaled & 0xFFFFFFFF);
+    }
+    return real;
 }
 
 static BOOL WINAPI hk_QueryPerformanceCounter(LARGE_INTEGER *lpCount) {
-    if (g_cheats.time_freeze && lpCount) {
+    if (!lpCount) return real_QueryPerformanceCounter(lpCount);
+    BOOL ok = real_QueryPerformanceCounter(lpCount);
+    if (!ok) return FALSE;
+    if (g_cheats.time_freeze) {
         lpCount->QuadPart = g_freeze_perf;
         return TRUE;
     }
-    return real_QueryPerformanceCounter(lpCount);
+    if (g_cheats.speed_mult > 1) {
+        ULONGLONG scaled = g_speed_ref_perf + (ULONGLONG)(lpCount->QuadPart - g_speed_ref_perf) * g_cheats.speed_mult;
+        lpCount->QuadPart = scaled;
+    }
+    return TRUE;
 }
 
 void install_time_hooks(void) {
@@ -58,6 +72,14 @@ void install_time_hooks(void) {
     if (MH_CreateHookApi(L"kernel32.dll", "QueryPerformanceCounter", (LPVOID)hk_QueryPerformanceCounter, (void**)&real_QueryPerformanceCounter) != MH_OK) {
         LOG("QueryPerformanceCounter hook failed");
     }
+
+    /* Take reference timestamps for speed multiplier */
+    g_speed_ref_tick = real_GetTickCount ? real_GetTickCount() : GetTickCount();
+    LARGE_INTEGER li;
+    if (real_QueryPerformanceCounter ? real_QueryPerformanceCounter(&li) : QueryPerformanceCounter(&li)) {
+        g_speed_ref_perf = li.QuadPart;
+    }
+
     g_time_hooks_installed = 1;
     LOG("Time hooks installed via MinHook");
 }
