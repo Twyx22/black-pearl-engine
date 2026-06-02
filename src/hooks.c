@@ -3,12 +3,11 @@
 #include "cheats.h"
 #include "menu.h"
 #include "input.h"
+#include "config.h"
 #include <MinHook.h>
 
 static HWND g_game_hwnd = NULL;
 static WNDPROC g_orig_wndproc = NULL;
-static int g_wndproc_blocked = 0;
-
 static HRESULT (WINAPI *orig_EndScene)(IDirect3DDevice9*) = NULL;
 static void **g_fake_vt = NULL;
 static HRESULT (WINAPI *orig_Reset)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*) = NULL;
@@ -54,17 +53,20 @@ void install_time_hooks(void) {
 }
 
 static LRESULT CALLBACK hk_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (g_menu_open) {
-        if (msg == WM_KEYDOWN || msg == WM_KEYUP ||
-            msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP ||
-            msg == WM_CHAR || msg == WM_DEADCHAR) {
-            g_wndproc_blocked++;
-            if (g_wndproc_blocked <= 5) {
-                LOG("WndProc blocked msg=%04X vk=%d", msg, (int)wParam);
-            }
-            return 0;
-        }
+    int vk = (int)wParam;
+    if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
+        if (vk >= 0 && vk < 256) g_key_states[vk] = 1;
+    } else if (msg == WM_KEYUP || msg == WM_SYSKEYUP) {
+        if (vk >= 0 && vk < 256) g_key_states[vk] = 0;
     }
+
+    if (g_menu_open &&
+        (msg == WM_KEYDOWN || msg == WM_KEYUP ||
+         msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP ||
+         msg == WM_CHAR || msg == WM_DEADCHAR)) {
+        return 0;
+    }
+
     if (g_orig_wndproc) {
         return CallWindowProc(g_orig_wndproc, hwnd, msg, wParam, lParam);
     }
