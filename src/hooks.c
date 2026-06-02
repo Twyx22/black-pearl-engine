@@ -50,6 +50,7 @@ void time_freeze_snapshot(void) {
 }
 
 static DWORD scale_tic_delta(DWORD real) {
+    int mult = g_cheats.speed_mult > 1 ? g_cheats.speed_mult : 1;
     if (!g_speed_tic_init) {
         g_speed_tic_last_real = real;
         g_speed_tic_last_out = real;
@@ -59,12 +60,13 @@ static DWORD scale_tic_delta(DWORD real) {
     DWORD delta = real - g_speed_tic_last_real;
     if (delta) {
         g_speed_tic_last_real = real;
-        g_speed_tic_last_out += delta * g_cheats.speed_mult;
+        g_speed_tic_last_out += delta * mult;
     }
     return g_speed_tic_last_out;
 }
 
 static LONGLONG scale_qpc_delta(LONGLONG real) {
+    int mult = g_cheats.speed_mult > 1 ? g_cheats.speed_mult : 1;
     if (!g_speed_qpc_init) {
         g_speed_qpc_last_real = real;
         g_speed_qpc_last_out = real;
@@ -74,25 +76,15 @@ static LONGLONG scale_qpc_delta(LONGLONG real) {
     LONGLONG delta = real - g_speed_qpc_last_real;
     if (delta) {
         g_speed_qpc_last_real = real;
-        g_speed_qpc_last_out += delta * g_cheats.speed_mult;
+        g_speed_qpc_last_out += delta * mult;
     }
     return g_speed_qpc_last_out;
-}
-
-static void reset_speed_tic(void) {
-    g_speed_tic_init = 0;
-}
-
-static void reset_speed_qpc(void) {
-    g_speed_qpc_init = 0;
 }
 
 static DWORD WINAPI hk_GetTickCount(void) {
     DWORD real = real_GetTickCount();
     if (g_cheats.time_freeze) return g_freeze_tick;
-    if (g_cheats.speed_mult > 1) return scale_tic_delta(real);
-    reset_speed_tic();
-    return real;
+    return scale_tic_delta(real);
 }
 
 static BOOL WINAPI hk_QueryPerformanceCounter(LARGE_INTEGER *lpCount) {
@@ -103,20 +95,14 @@ static BOOL WINAPI hk_QueryPerformanceCounter(LARGE_INTEGER *lpCount) {
         lpCount->QuadPart = g_freeze_perf;
         return TRUE;
     }
-    if (g_cheats.speed_mult > 1) {
-        lpCount->QuadPart = scale_qpc_delta(lpCount->QuadPart);
-        return TRUE;
-    }
-    reset_speed_qpc();
+    lpCount->QuadPart = scale_qpc_delta(lpCount->QuadPart);
     return TRUE;
 }
 
 static DWORD WINAPI hk_timeGetTime(void) {
     DWORD real = real_timeGetTime();
     if (g_cheats.time_freeze) return g_freeze_tick;
-    if (g_cheats.speed_mult > 1) return scale_tic_delta(real);
-    reset_speed_tic();
-    return real;
+    return scale_tic_delta(real);
 }
 
 void install_time_hooks(void) {
