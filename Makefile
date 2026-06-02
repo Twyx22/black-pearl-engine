@@ -2,7 +2,7 @@ CXX = i686-w64-mingw32-g++
 CXXFLAGS = -O2 -s -static-libgcc -static-libstdc++
 LDFLAGS = -Wl,--enable-stdcall-fixup -ld3dx9 -lwinmm -lpsapi
 
-SRCS = src/d3d9_proxy.c src/utils.c src/cheats.c src/menu.c src/hooks.c src/input.c
+SRCS = src/d3d9_proxy.c src/utils.c src/cheats.c src/menu.c src/hooks.c src/input.c src/config_loader.c
 OBJS = $(SRCS:.c=.o)
 
 all: d3d9.dll
