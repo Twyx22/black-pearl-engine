@@ -18,7 +18,6 @@ BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID reserved) {
             load_config();
             hook_peekmessage();
             install_time_hooks();
-            install_sub_473770_hook();
             MH_EnableHook(MH_ALL_HOOKS);
             return TRUE;
         case DLL_PROCESS_DETACH:
