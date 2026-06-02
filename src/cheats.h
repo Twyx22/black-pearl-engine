@@ -9,6 +9,8 @@ typedef struct {
     int score_mult;
     int force_custom_studs;
     int custom_stud_value;
+    int force_golden_bricks;
+    int golden_brick_value;
 } CheatsState;
 
 extern CheatsState g_cheats;
@@ -22,7 +24,14 @@ void remove_health_patch(void);
 void apply_super_speed(void);
 void remove_super_speed(void);
 
+void apply_super_jump(void);
+void remove_super_jump(void);
+
+void apply_moon_jump(void);
+void remove_moon_jump(void);
+
 void force_custom_studs(void);
+void force_golden_bricks(void);
 
 extern const char *g_entities[64];
 extern int g_entity_count;

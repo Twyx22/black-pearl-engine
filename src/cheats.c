@@ -3,83 +3,47 @@
 #include "hooks.h"
 #include "config.h"
 
-CheatsState g_cheats = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT};
+CheatsState g_cheats = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT};
 
-#define MAX_STUD_PATCHES 32
-static DWORD g_stud_patch_addrs[MAX_STUD_PATCHES];
-static unsigned char g_stud_patch_origs[MAX_STUD_PATCHES][10];
-static int g_stud_patch_count = 0;
+/* Stud patch: NOP sub ebx,eax and sbb esi,edx at fixed addresses (Cheat Engine found) */
+static unsigned char g_stud_sub_orig[2] = {0};
+static unsigned char g_stud_sbb_orig[2] = {0};
 static int g_stud_patched = 0;
-
-static int g_stud_scan_attempts = 0;
-
-static void scan_stud_subtractions(void) {
-    if (g_stud_patch_count > 0) return;
-    if (g_stud_scan_attempts > 10) return;
-    g_stud_scan_attempts++;
-
-    DWORD text_start, text_size;
-    if (!find_text_section(&text_start, &text_size)) {
-        LOG("Stud scan: .text section not found!");
-        return;
-    }
-    LOG("Stud scan: .text at 0x%08X, size %u (attempt %d)", text_start, text_size, g_stud_scan_attempts);
-
-    unsigned char *code = (unsigned char*)text_start;
-    for (DWORD i = 0; i < text_size - 10 && g_stud_patch_count < MAX_STUD_PATCHES; i++) {
-        if (code[i] == 0x81 && (code[i+1] & 0xC7) == 0x05) {
-            DWORD disp = *(DWORD*)(code + i + 2);
-            if (disp == STUD_COUNTER_ADDR) {
-                g_stud_patch_addrs[g_stud_patch_count] = text_start + i;
-                memcpy(g_stud_patch_origs[g_stud_patch_count], code + i, 10);
-                g_stud_patch_count++;
-            }
-        }
-        if (code[i] == 0x83 && (code[i+1] & 0xC7) == 0x05) {
-            DWORD disp = *(DWORD*)(code + i + 2);
-            if (disp == STUD_COUNTER_ADDR) {
-                g_stud_patch_addrs[g_stud_patch_count] = text_start + i;
-                memcpy(g_stud_patch_origs[g_stud_patch_count], code + i, 7);
-                g_stud_patch_count++;
-            }
-        }
-    }
-    LOG("Stud scan: found %d SUB instructions targeting 0x%08X", g_stud_patch_count, STUD_COUNTER_ADDR);
-}
 
 void apply_stud_patch(void) {
     if (g_stud_patched) return;
-    scan_stud_subtractions();
-    if (g_stud_patch_count == 0) {
-        LOG("Infinite Studs: no patches found, will retry next frame");
+    
+    /* Read original bytes */
+    memcpy(g_stud_sub_orig, (void*)STUD_SUB_ADDR, 2);
+    memcpy(g_stud_sbb_orig, (void*)STUD_SBB_ADDR, 2);
+    
+    /* NOP sub ebx,eax (2 bytes) */
+    unsigned char nop2[2] = {0x90, 0x90};
+    DWORD old;
+    if (VirtualProtect((LPVOID)STUD_SUB_ADDR, 2, PAGE_EXECUTE_READWRITE, &old)) {
+        memcpy((void*)STUD_SUB_ADDR, nop2, 2);
+        VirtualProtect((LPVOID)STUD_SUB_ADDR, 2, old, &old);
+        LOG("Infinite Studs: NOP'd sub ebx,eax at 0x%08X", STUD_SUB_ADDR);
+    } else {
+        LOG("Infinite Studs: VirtualProtect FAILED at 0x%08X", STUD_SUB_ADDR);
         return;
     }
-    unsigned char nops[10] = {0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90};
-    for (int i = 0; i < g_stud_patch_count; i++) {
-        int len = 10;
-        unsigned char *p = g_stud_patch_origs[i];
-        if (p[0] == 0x83) len = 7;
-        DWORD old;
-        if (VirtualProtect((LPVOID)g_stud_patch_addrs[i], len, PAGE_EXECUTE_READWRITE, &old)) {
-            memcpy((void*)g_stud_patch_addrs[i], nops, len);
-            VirtualProtect((LPVOID)g_stud_patch_addrs[i], len, old, &old);
-            LOG("Stud patch[%d]: NOP'd %d bytes at 0x%08X", i, len, g_stud_patch_addrs[i]);
-        } else {
-            LOG("Stud patch[%d]: VirtualProtect FAILED at 0x%08X", i, g_stud_patch_addrs[i]);
-        }
+    
+    /* NOP sbb esi,edx (2 bytes) */
+    if (VirtualProtect((LPVOID)STUD_SBB_ADDR, 2, PAGE_EXECUTE_READWRITE, &old)) {
+        memcpy((void*)STUD_SBB_ADDR, nop2, 2);
+        VirtualProtect((LPVOID)STUD_SBB_ADDR, 2, old, &old);
+        LOG("Infinite Studs: NOP'd sbb esi,edx at 0x%08X", STUD_SBB_ADDR);
     }
+    
     g_stud_patched = 1;
-    LOG("Infinite Studs: patched %d locations", g_stud_patch_count);
+    LOG("Infinite Studs: patched");
 }
 
 void remove_stud_patch(void) {
     if (!g_stud_patched) return;
-    for (int i = 0; i < g_stud_patch_count; i++) {
-        int len = 10;
-        unsigned char *p = g_stud_patch_origs[i];
-        if (p[0] == 0x83) len = 7;
-        patch_mem(g_stud_patch_addrs[i], g_stud_patch_origs[i], len);
-    }
+    patch_mem(STUD_SUB_ADDR, g_stud_sub_orig, 2);
+    patch_mem(STUD_SBB_ADDR, g_stud_sbb_orig, 2);
     g_stud_patched = 0;
     LOG("Infinite Studs: unpatched");
 }
@@ -160,6 +124,17 @@ void force_custom_studs(void) {
     }
 }
 
+void force_golden_bricks(void) {
+    if (!g_cheats.force_golden_bricks) return;
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    DWORD addr = base + GOLDEN_BRICK_OFFSET;
+    DWORD old;
+    if (VirtualProtect((LPVOID)addr, 4, PAGE_READWRITE, &old)) {
+        *(int*)addr = g_cheats.golden_brick_value;
+        VirtualProtect((LPVOID)addr, 4, old, &old);
+    }
+}
+
 static float g_speed_walk_orig = SPEED_WALK_DEFAULT;
 static float g_speed_run_orig  = SPEED_RUN_DEFAULT;
 
@@ -187,6 +162,45 @@ void remove_super_speed(void) {
     }
 }
 
+static float g_gravity_orig = GRAVITY_DEFAULT;
+static float g_jump_force_orig = JUMP_FORCE_DEFAULT;
+
+void apply_super_jump(void) {
+    DWORD old;
+    if (VirtualProtect((LPVOID)JUMP_FORCE_ADDR, 4, PAGE_READWRITE, &old)) {
+        *(float*)JUMP_FORCE_ADDR = JUMP_FORCE_SUPER;
+        VirtualProtect((LPVOID)JUMP_FORCE_ADDR, 4, old, &old);
+        LOG("Super Jump: force set to %.1f", JUMP_FORCE_SUPER);
+    }
+}
+
+void remove_super_jump(void) {
+    DWORD old;
+    if (VirtualProtect((LPVOID)JUMP_FORCE_ADDR, 4, PAGE_READWRITE, &old)) {
+        *(float*)JUMP_FORCE_ADDR = g_jump_force_orig;
+        VirtualProtect((LPVOID)JUMP_FORCE_ADDR, 4, old, &old);
+        LOG("Super Jump: restored to %.1f", g_jump_force_orig);
+    }
+}
+
+void apply_moon_jump(void) {
+    DWORD old;
+    if (VirtualProtect((LPVOID)GRAVITY_ADDR, 4, PAGE_READWRITE, &old)) {
+        *(float*)GRAVITY_ADDR = GRAVITY_MOON;
+        VirtualProtect((LPVOID)GRAVITY_ADDR, 4, old, &old);
+        LOG("Moon Jump: gravity set to %.1f", GRAVITY_MOON);
+    }
+}
+
+void remove_moon_jump(void) {
+    DWORD old;
+    if (VirtualProtect((LPVOID)GRAVITY_ADDR, 4, PAGE_READWRITE, &old)) {
+        *(float*)GRAVITY_ADDR = g_gravity_orig;
+        VirtualProtect((LPVOID)GRAVITY_ADDR, 4, old, &old);
+        LOG("Moon Jump: restored to %.1f", g_gravity_orig);
+    }
+}
+
 const char *g_entities[64];
 int g_entity_count = 0;
 
@@ -210,6 +224,8 @@ void update_cheats(void) {
     if (g_cheats.infinite_studs) apply_stud_patch(); else remove_stud_patch();
     if (g_cheats.invincible) apply_health_patch(); else remove_health_patch();
     if (g_cheats.super_speed) apply_super_speed(); else remove_super_speed();
+    if (g_cheats.super_jump) apply_super_jump(); else remove_super_jump();
+    if (g_cheats.moon_jump) apply_moon_jump(); else remove_moon_jump();
 
     if (g_cheats.time_freeze && !prev_time_freeze) {
         time_freeze_snapshot();
@@ -218,4 +234,5 @@ void update_cheats(void) {
     prev_time_freeze = g_cheats.time_freeze;
 
     force_custom_studs();
+    force_golden_bricks();
 }

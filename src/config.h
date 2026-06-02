@@ -16,11 +16,13 @@
 
 /* --- Studs --- */
 
-/* Address of the stud counter variable in memory */
-#define STUD_COUNTER_ADDR       0x00E41868
+/* Address where the stud display value is written (Cheat Engine found) */
+#define STUD_DISPLAY_ADDR       0x0369B660
 
-/* Address where the stud display value is written */
-#define STUD_DISPLAY_ADDR       0x0359B660
+/* Instruction that subtracts studs: sub ebx,eax at _LEGOPirates.exe+2B1BC5 */
+#define STUD_SUB_ADDR           0x006B1BC5
+/* Also sbb esi,edx at _LEGOPirates.exe+2B1BC7 (2 bytes) */
+#define STUD_SBB_ADDR           0x006B1BC7
 
 /* --- Health --- */
 
@@ -41,10 +43,34 @@
 #define SPEED_WALK_CHEAT        300.0f
 #define SPEED_RUN_CHEAT         350.0f
 
+/* --- Jump Physics --- */
+
+/* Float addresses for gravity and jump force (contiguous structure) */
+#define GRAVITY_ADDR            0x00E24C48
+#define JUMP_FORCE_ADDR         0x00E24C4C
+
+/* Default physics values */
+#define GRAVITY_DEFAULT         -20.0f
+#define JUMP_FORCE_DEFAULT      10.0f
+
+/* Super Jump: high jump force */
+#define JUMP_FORCE_SUPER        50.0f
+
+/* Moon Jump: low gravity */
+#define GRAVITY_MOON            -2.0f
+
 /* --- Entity Scanner --- */
 
 /* Offset to the game's entity string table */
 #define ENTITY_TABLE_OFFSET     0x00C8F400
+
+/* --- Golden Bricks --- */
+
+/* Offset from module base for golden bricks count (Cheat Engine: _LEGOPirates.exe+B776E4) */
+#define GOLDEN_BRICK_OFFSET     0xB776E4
+
+/* Default golden bricks value when forced */
+#define GOLDEN_BRICK_DEFAULT    85
 
 /* --- Custom Studs --- */
 

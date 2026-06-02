@@ -28,6 +28,8 @@ static Item stud_items[] = {
     {"Infinite Studs", 0, &g_cheats.infinite_studs},
     {"Force Custom Value", 0, &g_cheats.force_custom_studs},
     {"Custom Studs", 1, &g_cheats.custom_stud_value, 0, 999999999},
+    {"Force Golden Bricks", 0, &g_cheats.force_golden_bricks},
+    {"Golden Bricks", 1, &g_cheats.golden_brick_value, 0, 999},
     {"Stud Magnet", 0, NULL},
     {"Score Multiplier", 1, &g_cheats.score_mult, 1, 10},
 };
@@ -45,7 +47,7 @@ static Item visual_items[] = {
 
 Tab tabs[] = {
     {"Health", health_items, 4},
-    {"Studs", stud_items, 5},
+    {"Studs", stud_items, 7},
     {"Fun", fun_items, 5},
     {"Visual", visual_items, 2},
 };
