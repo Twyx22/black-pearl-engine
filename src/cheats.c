@@ -11,10 +11,19 @@ static unsigned char g_stud_patch_origs[MAX_STUD_PATCHES][10];
 static int g_stud_patch_count = 0;
 static int g_stud_patched = 0;
 
+static int g_stud_scan_attempts = 0;
+
 static void scan_stud_subtractions(void) {
     if (g_stud_patch_count > 0) return;
+    if (g_stud_scan_attempts > 10) return;
+    g_stud_scan_attempts++;
+
     DWORD text_start, text_size;
-    if (!find_text_section(&text_start, &text_size)) return;
+    if (!find_text_section(&text_start, &text_size)) {
+        LOG("Stud scan: .text section not found!");
+        return;
+    }
+    LOG("Stud scan: .text at 0x%08X, size %u (attempt %d)", text_start, text_size, g_stud_scan_attempts);
 
     unsigned char *code = (unsigned char*)text_start;
     for (DWORD i = 0; i < text_size - 10 && g_stud_patch_count < MAX_STUD_PATCHES; i++) {
@@ -35,18 +44,29 @@ static void scan_stud_subtractions(void) {
             }
         }
     }
-    LOG("Stud subtractions found: %d", g_stud_patch_count);
+    LOG("Stud scan: found %d SUB instructions targeting 0x%08X", g_stud_patch_count, STUD_COUNTER_ADDR);
 }
 
 void apply_stud_patch(void) {
     if (g_stud_patched) return;
     scan_stud_subtractions();
+    if (g_stud_patch_count == 0) {
+        LOG("Infinite Studs: no patches found, will retry next frame");
+        return;
+    }
     unsigned char nops[10] = {0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90};
     for (int i = 0; i < g_stud_patch_count; i++) {
         int len = 10;
         unsigned char *p = g_stud_patch_origs[i];
         if (p[0] == 0x83) len = 7;
-        patch_mem(g_stud_patch_addrs[i], nops, len);
+        DWORD old;
+        if (VirtualProtect((LPVOID)g_stud_patch_addrs[i], len, PAGE_EXECUTE_READWRITE, &old)) {
+            memcpy((void*)g_stud_patch_addrs[i], nops, len);
+            VirtualProtect((LPVOID)g_stud_patch_addrs[i], len, old, &old);
+            LOG("Stud patch[%d]: NOP'd %d bytes at 0x%08X", i, len, g_stud_patch_addrs[i]);
+        } else {
+            LOG("Stud patch[%d]: VirtualProtect FAILED at 0x%08X", i, g_stud_patch_addrs[i]);
+        }
     }
     g_stud_patched = 1;
     LOG("Infinite Studs: patched %d locations", g_stud_patch_count);
@@ -131,6 +151,12 @@ void force_custom_studs(void) {
     if (VirtualProtect((LPVOID)addr, 4, PAGE_READWRITE, &old)) {
         *(int*)addr = g_cheats.custom_stud_value;
         VirtualProtect((LPVOID)addr, 4, old, &old);
+    } else {
+        static int logged = 0;
+        if (!logged) {
+            LOG("Custom studs: VirtualProtect FAILED at 0x%08X", addr);
+            logged = 1;
+        }
     }
 }
 
