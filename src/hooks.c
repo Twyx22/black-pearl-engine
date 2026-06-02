@@ -285,18 +285,20 @@ void* get_level_editor(void) {
     return g_level_editor;
 }
 
-/* vfunction12 debug hook */
-typedef void (__fastcall *V12Fn_t)(void* thisptr, void* edx,
-                                    int* msg_struct, int* msg_id_ptr, int unused);
+/* vfunction12 debug hook
+ * Signature: void __thiscall(LevelEditor *this, int *msg_struct, int *msg_id_ptr, int unused)
+ * ECX=this, [ESP+4]=msg_struct, [ESP+8]=msg_id_ptr, [ESP+12]=unused
+ * Callee cleans: RET 0xc */
+typedef void (__thiscall *V12Fn_t)(void* thisptr, int* msg_struct, int* msg_id_ptr, int unused);
 static V12Fn_t real_v12 = NULL;
 static int g_v12_log_count = 0;
 static int g_v12_our_call = 0;
 
-static void __fastcall hk_v12(void* thisptr, void* edx,
-                               int* msg_struct, int* msg_id_ptr, int unused)
+static void __thiscall hk_v12(void* thisptr, int* msg_struct,
+                               int* msg_id_ptr, int unused)
 {
     int ours = g_v12_our_call;
-    if (g_v12_log_count < 60 || ours) {
+    if (g_v12_log_count < 100 || ours) {
         g_v12_log_count++;
         int msg_id = msg_id_ptr ? *msg_id_ptr : -1;
         int cond = msg_struct ? msg_struct[2] : -1;
@@ -317,7 +319,7 @@ static void __fastcall hk_v12(void* thisptr, void* edx,
             LOG("  entities_in_table=%d/300", count);
         }
     }
-    return real_v12(thisptr, edx, msg_struct, msg_id_ptr, unused);
+    real_v12(thisptr, msg_struct, msg_id_ptr, unused);
 }
 
 void install_v12_hook(void) {
@@ -341,10 +343,10 @@ void le_send_message(int msg_id, void *data) {
     int msg[4] = { 0, 0, 0, (int)data };
 
     g_v12_our_call = 1;
-    typedef void (__fastcall *fn_t)(void* thisptr, void* edx,
-                                     int* msg_struct, int* msg_id_ptr, int unused);
+    typedef void (__thiscall *fn_t)(void* thisptr, int* msg_struct,
+                                     int* msg_id_ptr, int unused);
     fn_t fn = (fn_t)vt[11];
-    fn(le, NULL, msg, &msg_id, 0);
+    fn(le, msg, &msg_id, 0);
     g_v12_our_call = 0;
     LOG("le_send_message(id=0x%X, data=%p) OK", msg_id, data);
 }
