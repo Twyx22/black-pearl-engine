@@ -11,6 +11,7 @@
 #include <MinHook.h>
 #include <d3dx9.h>
 #include <d3dx9math.h>
+#include <mmsystem.h>
 
 HWND g_game_hwnd = NULL;
 int g_imgui_ready = 0;
@@ -26,10 +27,19 @@ int g_mouse_lb = 0, g_mouse_rb = 0;
 
 DWORD (WINAPI *real_GetTickCount)(void) = NULL;
 BOOL (WINAPI *real_QueryPerformanceCounter)(LARGE_INTEGER*) = NULL;
+DWORD (WINAPI *real_timeGetTime)(void) = NULL;
 DWORD g_freeze_tick = 0;
 LONGLONG g_freeze_perf = 0;
-static DWORD g_speed_ref_tick = 0;
-static LONGLONG g_speed_ref_perf = 0;
+
+/* Per-frame speed tracking for GetTickCount / timeGetTime (DWORD ms) */
+static DWORD g_speed_tic_last_real = 0;
+static DWORD g_speed_tic_last_out = 0;
+static int g_speed_tic_init = 0;
+
+/* Per-frame speed tracking for QPC (LONGLONG) */
+static LONGLONG g_speed_qpc_last_real = 0;
+static LONGLONG g_speed_qpc_last_out = 0;
+static int g_speed_qpc_init = 0;
 
 void time_freeze_snapshot(void) {
     g_freeze_tick = real_GetTickCount ? real_GetTickCount() : GetTickCount();
@@ -39,13 +49,49 @@ void time_freeze_snapshot(void) {
     }
 }
 
+static DWORD scale_tic_delta(DWORD real) {
+    if (!g_speed_tic_init) {
+        g_speed_tic_last_real = real;
+        g_speed_tic_last_out = real;
+        g_speed_tic_init = 1;
+        return real;
+    }
+    DWORD delta = real - g_speed_tic_last_real;
+    if (delta) {
+        g_speed_tic_last_real = real;
+        g_speed_tic_last_out += delta * g_cheats.speed_mult;
+    }
+    return g_speed_tic_last_out;
+}
+
+static LONGLONG scale_qpc_delta(LONGLONG real) {
+    if (!g_speed_qpc_init) {
+        g_speed_qpc_last_real = real;
+        g_speed_qpc_last_out = real;
+        g_speed_qpc_init = 1;
+        return real;
+    }
+    LONGLONG delta = real - g_speed_qpc_last_real;
+    if (delta) {
+        g_speed_qpc_last_real = real;
+        g_speed_qpc_last_out += delta * g_cheats.speed_mult;
+    }
+    return g_speed_qpc_last_out;
+}
+
+static void reset_speed_tic(void) {
+    g_speed_tic_init = 0;
+}
+
+static void reset_speed_qpc(void) {
+    g_speed_qpc_init = 0;
+}
+
 static DWORD WINAPI hk_GetTickCount(void) {
     DWORD real = real_GetTickCount();
     if (g_cheats.time_freeze) return g_freeze_tick;
-    if (g_cheats.speed_mult > 1) {
-        ULONGLONG scaled = g_speed_ref_tick + (ULONGLONG)(real - g_speed_ref_tick) * g_cheats.speed_mult;
-        return (DWORD)(scaled & 0xFFFFFFFF);
-    }
+    if (g_cheats.speed_mult > 1) return scale_tic_delta(real);
+    reset_speed_tic();
     return real;
 }
 
@@ -58,10 +104,19 @@ static BOOL WINAPI hk_QueryPerformanceCounter(LARGE_INTEGER *lpCount) {
         return TRUE;
     }
     if (g_cheats.speed_mult > 1) {
-        ULONGLONG scaled = g_speed_ref_perf + (ULONGLONG)(lpCount->QuadPart - g_speed_ref_perf) * g_cheats.speed_mult;
-        lpCount->QuadPart = scaled;
+        lpCount->QuadPart = scale_qpc_delta(lpCount->QuadPart);
+        return TRUE;
     }
+    reset_speed_qpc();
     return TRUE;
+}
+
+static DWORD WINAPI hk_timeGetTime(void) {
+    DWORD real = real_timeGetTime();
+    if (g_cheats.time_freeze) return g_freeze_tick;
+    if (g_cheats.speed_mult > 1) return scale_tic_delta(real);
+    reset_speed_tic();
+    return real;
 }
 
 void install_time_hooks(void) {
@@ -72,14 +127,9 @@ void install_time_hooks(void) {
     if (MH_CreateHookApi(L"kernel32.dll", "QueryPerformanceCounter", (LPVOID)hk_QueryPerformanceCounter, (void**)&real_QueryPerformanceCounter) != MH_OK) {
         LOG("QueryPerformanceCounter hook failed");
     }
-
-    /* Take reference timestamps for speed multiplier */
-    g_speed_ref_tick = real_GetTickCount ? real_GetTickCount() : GetTickCount();
-    LARGE_INTEGER li;
-    if (real_QueryPerformanceCounter ? real_QueryPerformanceCounter(&li) : QueryPerformanceCounter(&li)) {
-        g_speed_ref_perf = li.QuadPart;
+    if (MH_CreateHookApi(L"winmm.dll", "timeGetTime", (LPVOID)hk_timeGetTime, (void**)&real_timeGetTime) != MH_OK) {
+        LOG("timeGetTime hook failed");
     }
-
     g_time_hooks_installed = 1;
     LOG("Time hooks installed via MinHook");
 }
