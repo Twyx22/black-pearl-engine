@@ -63,35 +63,32 @@ void install_time_hooks(void) {
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 static LRESULT CALLBACK hk_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    // 1. Track all keyboard state. Swallow F1 so the game never sees it.
+    // 1. Track keyboard state for our own menu navigation (always, menu open or not)
     if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
         int vk = (int)wParam;
-        if (vk >= 0 && vk < 256) {
-            g_key_states[vk] = 1;
-            if (vk == VK_F1) {
-                LOG("WndProc: F1 KEYDOWN received (lParam=%08X)", (unsigned)lParam);
-                return 0;                 // swallow F1 — menu_update_input will toggle
-            }
-        }
+        if (vk >= 0 && vk < 256) g_key_states[vk] = 1;
     } else if (msg == WM_KEYUP || msg == WM_SYSKEYUP) {
         int vk = (int)wParam;
         if (vk >= 0 && vk < 256) g_key_states[vk] = 0;
     }
 
-    // 2. Let ImGui see the message (for its internal state / widgets).
-    //    It returns TRUE only for messages it wants to swallow (e.g. mouse capture).
-    if (g_imgui_ready && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
-        return TRUE;
+    // 2. When menu is open: route ALL input through ImGui, block from game
+    if (g_menu_open) {
+        // Pass to ImGui first
+        if (g_imgui_ready && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+            return TRUE;
 
-    // 3. When the menu is open, block remaining keyboard messages from reaching the game.
-    if (g_menu_open &&
-        (msg == WM_KEYDOWN || msg == WM_KEYUP ||
-         msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP ||
-         msg == WM_CHAR || msg == WM_DEADCHAR)) {
-        return 0;
+        // Block ALL input messages from reaching the game
+        if (msg == WM_KEYDOWN || msg == WM_KEYUP ||
+            msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP ||
+            msg == WM_CHAR || msg == WM_DEADCHAR ||
+            (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST) ||
+            msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL) {
+            return 0;
+        }
     }
 
-    // 4. Forward everything else to the original WndProc.
+    // 3. Menu closed or non-input message: forward to original WndProc
     if (g_orig_wndproc) {
         return CallWindowProc(g_orig_wndproc, hwnd, msg, wParam, lParam);
     }
