@@ -85,7 +85,7 @@ static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
         g_sh = vp.Height;
     }
 
-    if (menu_should_be_ready() && !g_dev) {
+    if (menu_should_be_ready() && g_dev) {
         menu_init_fonts(d);
     }
     if (menu_should_be_ready() && !g_entity_count) scan_entities();
