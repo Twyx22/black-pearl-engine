@@ -6,6 +6,7 @@
 extern int g_menu_open;
 extern int g_sw, g_sh;
 extern IDirect3DDevice9 *g_dev;
+extern ID3DXFont *g_font_small;
 
 typedef struct { const char *name; int type; void *val; int min, max; void (*action)(void); } Item;
 typedef struct { const char *name; Item *items; int count; } Tab;

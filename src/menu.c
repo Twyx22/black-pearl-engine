@@ -43,8 +43,23 @@ static Item fun_items[] = {
     {"NoClip", 0, &g_cheats.noclip},
     {"Time Freeze", 0, &g_cheats.time_freeze},
 };
-static void editor_send_b22(void) { le_send_message(0xb22, NULL); }
-static void editor_send_e10(void) { le_send_message(0xe10, NULL); }
+static void editor_toggle(void) {
+    g_editor_enabled = !g_editor_enabled;
+    if (!g_editor_enabled) {
+        g_editor_cam_initialized = 0;
+        g_settransform_log_count = 0;
+        g_shader_const_log_count = 0;
+    } else {
+        g_proj_captured = 0;
+        g_extra_saved = 0;
+    }
+    LOG("editor_toggle: g_editor_enabled=%d cam_init=%d le=%p", g_editor_enabled, g_editor_cam_initialized, get_level_editor());
+    if (g_editor_enabled) {
+        LOG("editor_toggle: sending 0xB22 (entity selection)");
+        le_send_message(0xb22, NULL);
+    }
+}
+static void editor_toggle_cycle(void) { g_editor_auto_cycle = !g_editor_auto_cycle; }
 
 static Item visual_items[] = {
     {"FPS Counter", 0, &g_cheats.show_fps},
@@ -52,8 +67,7 @@ static Item visual_items[] = {
 };
 
 static Item editor_items[] = {
-    {"Send 0xb22 (Select)", 2, NULL, 0, 0, editor_send_b22},
-    {"Send 0xe10 (Toggle)", 2, NULL, 0, 0, editor_send_e10},
+    {"Launch Editor Mode", 2, NULL, 0, 0, editor_toggle},
 };
 
 Tab tabs[] = {
@@ -61,7 +75,7 @@ Tab tabs[] = {
     {"Studs", stud_items, 7},
     {"Fun", fun_items, 5},
     {"Visual", visual_items, 2},
-    {"Editor", editor_items, 2},
+    {"Editor", editor_items, 1},
 };
 
 void menu_init_imgui(IDirect3DDevice9 *d, HWND hwnd) {
@@ -166,12 +180,21 @@ void menu_update_input(void) {
         return;
     }
 
-    if (key_pressed(VK_UP))   { g_sel--; if (g_sel < 0) g_sel = 0; }
-    if (key_pressed(VK_DOWN)) { g_sel++; if (g_sel >= tabs[g_tab].count) g_sel = tabs[g_tab].count - 1; }
+    if (key_pressed(VK_UP)) {
+        g_sel--;
+        while (g_sel > 0 && tabs[g_tab].items[g_sel].type == 3) g_sel--;
+        if (g_sel < 0) g_sel = 0;
+    }
+    if (key_pressed(VK_DOWN)) {
+        g_sel++;
+        while (g_sel < tabs[g_tab].count - 1 && tabs[g_tab].items[g_sel].type == 3) g_sel++;
+        if (g_sel >= tabs[g_tab].count) g_sel = tabs[g_tab].count - 1;
+    }
     if (key_pressed(VK_LEFT))  { g_tab = (g_tab - 1 + TAB_COUNT) % TAB_COUNT; g_sel = 0; }
     if (key_pressed(VK_RIGHT)) { g_tab = (g_tab + 1) % TAB_COUNT; g_sel = 0; }
     if (key_pressed(VK_RETURN)) {
         Item *it = &tabs[g_tab].items[g_sel];
+        if (it->type == 3) return; /* separator */
         if (it->type == 2 && it->action) {
             it->action();
         } else if (it->type == 0 && it->val) {
@@ -237,6 +260,11 @@ void menu_render(void) {
     for (int i = 0; i < cur->count; i++) {
         int iy = items_y + i * (ITEM_H + 4);
         Item *it = &cur->items[i];
+
+        if (it->type == 3) {
+            dl->AddRectFilled(ImVec2((float)(mx+16), (float)(iy+ITEM_H/2)), ImVec2((float)(mx+MENU_W-16), (float)(iy+ITEM_H/2+1)), IM_COL32(80,80,80,255));
+            continue;
+        }
 
         if (i % 2 == 0)
             dl->AddRectFilled(ImVec2((float)(mx+8), (float)iy), ImVec2((float)(mx+MENU_W-8), (float)(iy+ITEM_H)), IM_COL32(255,255,255,32));
