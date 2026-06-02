@@ -2,6 +2,7 @@
 #include "utils.h"
 #include "cheats.h"
 #include "input.h"
+#include "config_loader.h"
 #include <stdio.h>
 
 int g_menu_open = 0;
@@ -77,8 +78,12 @@ static int key_pressed(int vk) {
 
 void menu_update_input(void) {
     if (key_pressed(VK_F1)) {
+        int was_open = g_menu_open;
         g_menu_open = !g_menu_open;
         g_editing_item_ptr = NULL;
+        if (was_open && !g_menu_open) {
+            save_config();
+        }
     }
     if (!g_menu_open) {
         if (key_pressed(VK_F2)) g_cheats.show_debug = !g_cheats.show_debug;
