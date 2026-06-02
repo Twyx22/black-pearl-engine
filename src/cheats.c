@@ -264,7 +264,9 @@ void scan_entities(void) {
             g_entities[g_entity_count++] = str;
         }
     }
-    LOG("Entities: %d", g_entity_count);
+    if (g_entity_count > 0) {
+        LOG("Entities: %d", g_entity_count);
+    }
 }
 
 void update_cheats(void) {

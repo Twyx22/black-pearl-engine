@@ -91,6 +91,10 @@
 #define DIDEV_VT_ACQUIRE            7
 #define DIDEV_VT_UNACQUIRE          8
 
+/* --- Debug Hooks --- */
+
+#define SUB_473770_OFFSET       0x73770
+
 /* --- Menu Settings --- */
 
 #define MENU_DEFAULT_WIDTH      480

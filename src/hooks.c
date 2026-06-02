@@ -126,7 +126,10 @@ static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
     if (menu_should_be_ready() && g_dev) {
         menu_init_fonts(d);
     }
-    if (menu_should_be_ready() && !g_entity_count) scan_entities();
+    if (menu_should_be_ready() && !g_entity_count) {
+        static int scanned = 0;
+        if (!scanned) { scanned = 1; scan_entities(); }
+    }
 
     if (!g_game_hwnd && g_dev) {
         D3DDEVICE_CREATION_PARAMETERS cp;
@@ -251,6 +254,29 @@ extern "C" __declspec(dllexport) int WINAPI D3DPERF_EndEvent(void) {
     char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
     HMODULE h = GetModuleHandleA(path); if (h) f = (fn)GetProcAddress(h, "D3DPERF_EndEvent");
     return f ? f() : 0;
+}
+
+/* Debug hook for sub_473770: int __cdecl(signed char*, signed char*) */
+typedef int (__cdecl *sub_473770_t)(signed char *, signed char *);
+static sub_473770_t real_sub_473770 = NULL;
+
+static int __cdecl hk_sub_473770(signed char *a1, signed char *a2) {
+    int ret = real_sub_473770(a1, a2);
+    LOG("sub_473770(%p, \"%s\") = %d", a1, a2 ? (char*)a2 : "(null)", ret);
+    return ret;
+}
+
+void install_sub_473770_hook(void) {
+    if (real_sub_473770) return;
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    LPVOID target = (LPVOID)(base + SUB_473770_OFFSET);
+    MH_STATUS st = MH_CreateHook(target, (LPVOID)hk_sub_473770, (void**)&real_sub_473770);
+    if (st == MH_OK) {
+        MH_EnableHook(target);
+        LOG("sub_473770 hook installed at %p", target);
+    } else {
+        LOG("sub_473770 hook FAILED at %p (err=%d)", target, (int)st);
+    }
 }
 
 void hooks_cleanup(void) {
