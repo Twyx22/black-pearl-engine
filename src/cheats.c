@@ -1,10 +1,10 @@
 #include "cheats.h"
 #include "utils.h"
 #include "hooks.h"
+#include "config.h"
 
-CheatsState g_cheats = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 999999};
+CheatsState g_cheats = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT};
 
-#define STUD_COUNTER_ADDR 0x00E41868
 #define MAX_STUD_PATCHES 32
 static DWORD g_stud_patch_addrs[MAX_STUD_PATCHES];
 static unsigned char g_stud_patch_origs[MAX_STUD_PATCHES][10];
@@ -78,7 +78,7 @@ static void scan_health_decrements(void) {
     for (DWORD i = 0; i < text_size - 10 && g_health_count < 16; i++) {
         if (code[i] == 0xFE && (code[i+1] & 0xC0) == 0x80) {
             DWORD disp = *(DWORD*)(code + i + 2);
-            if (disp == 0x864) {
+            if (disp == HEALTH_OFFSET) {
                 g_health_addrs[g_health_count] = text_start + i;
                 memcpy(g_health_origs[g_health_count], code + i, 4);
                 g_health_count++;
@@ -86,7 +86,7 @@ static void scan_health_decrements(void) {
         }
         if (code[i] == 0x80 && (code[i+1] & 0xC0) == 0x80 && code[i+6] == 0x01) {
             DWORD disp = *(DWORD*)(code + i + 2);
-            if (disp == 0x864) {
+            if (disp == HEALTH_OFFSET) {
                 g_health_addrs[g_health_count] = text_start + i;
                 memcpy(g_health_origs[g_health_count], code + i, 4);
                 g_health_count++;
@@ -94,7 +94,7 @@ static void scan_health_decrements(void) {
         }
         if (code[i] == 0x83 && (code[i+1] & 0xC0) == 0x80 && code[i+6] == 0x01) {
             DWORD disp = *(DWORD*)(code + i + 2);
-            if (disp == 0x864) {
+            if (disp == HEALTH_OFFSET) {
                 g_health_addrs[g_health_count] = text_start + i;
                 memcpy(g_health_origs[g_health_count], code + i, 4);
                 g_health_count++;
@@ -124,8 +124,6 @@ void remove_health_patch(void) {
     LOG("Invincibility: unpatched");
 }
 
-#define STUD_DISPLAY_ADDR 0x0359B660
-
 void force_custom_studs(void) {
     if (!g_cheats.force_custom_studs) return;
     DWORD addr = STUD_DISPLAY_ADDR;
@@ -136,19 +134,17 @@ void force_custom_studs(void) {
     }
 }
 
-#define SPEED_WALK_ADDR 0x00E24C50
-#define SPEED_RUN_ADDR  0x00E24C54
-static float g_speed_walk_orig = 3.0f;
-static float g_speed_run_orig  = 3.5f;
+static float g_speed_walk_orig = SPEED_WALK_DEFAULT;
+static float g_speed_run_orig  = SPEED_RUN_DEFAULT;
 
 void apply_super_speed(void) {
     DWORD old;
     if (VirtualProtect((LPVOID)SPEED_WALK_ADDR, 4, PAGE_READWRITE, &old)) {
-        *(float*)SPEED_WALK_ADDR = 300.0f;
+        *(float*)SPEED_WALK_ADDR = SPEED_WALK_CHEAT;
         VirtualProtect((LPVOID)SPEED_WALK_ADDR, 4, old, &old);
     }
     if (VirtualProtect((LPVOID)SPEED_RUN_ADDR, 4, PAGE_READWRITE, &old)) {
-        *(float*)SPEED_RUN_ADDR = 350.0f;
+        *(float*)SPEED_RUN_ADDR = SPEED_RUN_CHEAT;
         VirtualProtect((LPVOID)SPEED_RUN_ADDR, 4, old, &old);
     }
 }
@@ -165,14 +161,13 @@ void remove_super_speed(void) {
     }
 }
 
-#define ENTITY_TABLE_OFF 0x00C8F400
 const char *g_entities[64];
 int g_entity_count = 0;
 
 void scan_entities(void) {
     DWORD base = (DWORD)GetModuleHandleA(NULL);
     if (!base) return;
-    DWORD *table = (DWORD*)(base + ENTITY_TABLE_OFF);
+    DWORD *table = (DWORD*)(base + ENTITY_TABLE_OFFSET);
     g_entity_count = 0;
     for (int i = 0; i < 1024 && g_entity_count < 64; i++) {
         const char *str = (const char*)table[i];

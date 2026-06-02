@@ -3,6 +3,7 @@
 #include "cheats.h"
 #include "menu.h"
 #include "hooks.h"
+#include "config.h"
 
 int g_key_states[256] = {0};
 int g_keys[256] = {0};
@@ -15,12 +16,6 @@ static int g_hook_log_count = 0;
 
 typedef HRESULT (WINAPI *DirectInput8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, void*);
 static DirectInput8Create_t real_DirectInput8Create = NULL;
-
-#define DI8_VT_CREATE_DEVICE 3
-
-#define DIDEV_VT_GET_DEVICE_STATE 9
-#define DIDEV_VT_ACQUIRE 7
-#define DIDEV_VT_UNACQUIRE 8
 
 static void **g_fake_di8_vt = NULL;
 static void **g_real_di8_vt = NULL;
