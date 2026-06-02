@@ -4,13 +4,18 @@
 #include "menu.h"
 #include "input.h"
 #include "config.h"
+#include "imgui.h"
+#include "backends/imgui_impl_win32.h"
+#include "backends/imgui_impl_dx9.h"
 #include <MinHook.h>
 #include <d3dx9.h>
 #include <d3dx9math.h>
 
-static HWND g_game_hwnd = NULL;
+HWND g_game_hwnd = NULL;
+int g_imgui_ready = 0;
 static WNDPROC g_orig_wndproc = NULL;
 static HRESULT (WINAPI *orig_EndScene)(IDirect3DDevice9*) = NULL;
+static HRESULT (WINAPI *orig_Present)(IDirect3DDevice9*, CONST RECT*, CONST RECT*, HWND, CONST RGNDATA*) = NULL;
 static void **g_fake_vt = NULL;
 static HRESULT (WINAPI *orig_Reset)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*) = NULL;
 
@@ -226,11 +231,18 @@ void install_time_hooks(void) {
     LOG("Time hooks installed via MinHook");
 }
 
+// ImGui's WndProcHandler: for keyboard (WM_KEYDOWN/UP) it records keys internally
+// and returns 0, so it never blocks them. For mouse/capture messages it may return
+// non-zero to indicate "ImGui consumed this".
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
 static LRESULT CALLBACK hk_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    int vk = (int)wParam;
+    // 1. Track keyboard state for our own menu navigation (always, menu open or not)
     if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
+        int vk = (int)wParam;
         if (vk >= 0 && vk < 256) g_key_states[vk] = 1;
     } else if (msg == WM_KEYUP || msg == WM_SYSKEYUP) {
+        int vk = (int)wParam;
         if (vk >= 0 && vk < 256) g_key_states[vk] = 0;
     } else if (msg == WM_MOUSEMOVE) {
         g_mouse_x = LOWORD(lParam);
@@ -245,13 +257,24 @@ static LRESULT CALLBACK hk_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         g_mouse_rb = 0;
     }
 
-    if ((g_menu_open || g_editor_enabled) &&
-        (msg == WM_KEYDOWN || msg == WM_KEYUP ||
-         msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP ||
-         msg == WM_CHAR || msg == WM_DEADCHAR)) {
-        return 0;
+    // 2. When menu is open: route ALL input through ImGui, block from game
+    if (g_menu_open) {
+        // Pass to ImGui first
+        if (g_imgui_ready && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+            return TRUE;
+
+        // Block ALL input messages from reaching the game
+        if (msg == WM_KEYDOWN || msg == WM_KEYUP ||
+            msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP ||
+            msg == WM_CHAR || msg == WM_DEADCHAR ||
+            (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST) ||
+            msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL) {
+            return 0;
+        }
+    }
     }
 
+    // 3. Menu closed or non-input message: forward to original WndProc
     if (g_orig_wndproc) {
         return CallWindowProc(g_orig_wndproc, hwnd, msg, wParam, lParam);
     }
@@ -268,63 +291,35 @@ static void hook_window(HWND hwnd) {
     }
 }
 
-static BOOL (WINAPI *real_PeekMessageA)(LPMSG, HWND, UINT, UINT, UINT) = NULL;
 
-static BOOL WINAPI hk_PeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin,
-                                    UINT wMsgFilterMax, UINT wRemoveMsg) {
-    BOOL ret = real_PeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
-    if (!ret || (!g_menu_open && !g_editor_enabled)) return ret;
 
-    /* Capture input state before removing messages from game */
-    UINT vk = lpMsg->wParam;
-    if (lpMsg->message == WM_KEYDOWN || lpMsg->message == WM_SYSKEYDOWN) {
-        if (vk < 256) g_key_states[vk] = 1;
-    } else if (lpMsg->message == WM_KEYUP || lpMsg->message == WM_SYSKEYUP) {
-        if (vk < 256) g_key_states[vk] = 0;
-    } else if (lpMsg->message == WM_MOUSEMOVE) {
-        g_mouse_x = LOWORD(lpMsg->lParam);
-        g_mouse_y = HIWORD(lpMsg->lParam);
-    } else if (lpMsg->message == WM_LBUTTONDOWN) {
-        g_mouse_lb = 1;
-    } else if (lpMsg->message == WM_LBUTTONUP) {
-        g_mouse_lb = 0;
-    } else if (lpMsg->message == WM_RBUTTONDOWN) {
-        g_mouse_rb = 1;
-    } else if (lpMsg->message == WM_RBUTTONUP) {
-        g_mouse_rb = 0;
-    }
-
-    /* Block keyboard AND mouse from reaching the game in editor mode */
-    if (lpMsg->message == WM_KEYDOWN || lpMsg->message == WM_KEYUP ||
-        lpMsg->message == WM_SYSKEYDOWN || lpMsg->message == WM_SYSKEYUP ||
-        lpMsg->message == WM_CHAR || lpMsg->message == WM_DEADCHAR ||
-        lpMsg->message == WM_MOUSEMOVE ||
-        lpMsg->message == WM_LBUTTONDOWN || lpMsg->message == WM_LBUTTONUP ||
-        lpMsg->message == WM_RBUTTONDOWN || lpMsg->message == WM_RBUTTONUP ||
-        lpMsg->message == WM_MBUTTONDOWN || lpMsg->message == WM_MBUTTONUP) {
-        if (wRemoveMsg & PM_REMOVE) {
-            lpMsg->message = WM_NULL;
-            lpMsg->wParam = 0;
-            lpMsg->lParam = 0;
-        } else {
-            MSG dummy;
-            real_PeekMessageA(&dummy, hWnd, lpMsg->message, lpMsg->message, PM_REMOVE);
-        }
-        return FALSE;
-    }
-    return ret;
-}
-
-void hook_peekmessage(void) {
-    if (real_PeekMessageA) return;
-    if (MH_CreateHookApi(L"user32.dll", "PeekMessageA", (LPVOID)hk_PeekMessageA, (void**)&real_PeekMessageA) != MH_OK) {
-        LOG("PeekMessageA hook failed");
-    }
-}
 
 static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
     menu_increment_frame();
     if (!g_dev) { g_dev = d; LOG("Device acquired"); }
+
+    if (!g_game_hwnd && g_dev) {
+        D3DDEVICE_CREATION_PARAMETERS cp;
+        if (SUCCEEDED(g_dev->GetCreationParameters(&cp))) {
+            g_game_hwnd = cp.hFocusWindow;
+            if (g_game_hwnd) {
+                hook_window(g_game_hwnd);
+            }
+        }
+    }
+
+    if (menu_get_frame() == 20) {
+        install_input_hooks();
+    }
+
+    menu_update_input();
+    update_cheats();
+
+    return orig_EndScene(d);
+}
+
+static HRESULT WINAPI hk_Present(IDirect3DDevice9 *d, CONST RECT *pSource, CONST RECT *pDest, HWND hDestOverride, CONST RGNDATA *pDirty) {
+    if (!g_dev) g_dev = d;
 
     D3DVIEWPORT9 vp;
     if (SUCCEEDED(d->GetViewport(&vp))) {
@@ -337,8 +332,11 @@ static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
         g_camera_valid = 1;
     }
 
-    if (menu_should_be_ready() && g_dev) {
-        menu_init_fonts(d);
+    if (menu_should_be_ready() && !g_imgui_ready) {
+        if (g_game_hwnd) {
+            menu_init_imgui(d, g_game_hwnd);
+            g_imgui_ready = 1;
+        }
     }
     if (menu_should_be_ready()) {
         static int scanned = 0;
@@ -347,34 +345,22 @@ static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
         if (!scanned_editor) { scanned_editor = 1; scan_entity_table(); }
     }
 
-    if (!g_game_hwnd && g_dev) {
-        D3DDEVICE_CREATION_PARAMETERS cp;
-        if (SUCCEEDED(g_dev->GetCreationParameters(&cp))) {
-            g_game_hwnd = cp.hFocusWindow;
-            if (!g_game_hwnd) g_game_hwnd = cp.hFocusWindow;
-            if (g_game_hwnd) {
-                hook_window(g_game_hwnd);
-            }
-        }
-    }
+    if (g_imgui_ready) {
+        ImGui_ImplDX9_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
 
-    if (menu_get_frame() > 10 && menu_get_frame() % 120 == 0) {
-        install_input_hooks();
-    }
+        menu_render_overlay();
+        menu_render_debug();
+        menu_render();
 
-    menu_update_input();
-    update_cheats();
-    menu_render_overlay(d);
-    if (g_editor_enabled) {
-        LOG("hk_EndScene: calling render_editor_overlay");
-        render_editor_overlay(d);
+        ImGui::Render();
+        ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
     }
-    menu_render_debug(d);
-    menu_render(d);
 
     /* Editor camera: init once, update every frame */
     if (g_editor_enabled && g_camera_valid && !g_editor_cam_initialized) {
-        LOG("EndScene: initializing editor camera");
+        LOG("Present: initializing editor camera");
         editor_cam_init();
     }
     if (g_editor_enabled && g_editor_cam_initialized) {
@@ -402,7 +388,6 @@ static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
     if (g_editor_enabled && !g_menu_open && g_selected_count > 0) {
         float speed = (g_key_states[VK_SHIFT] || g_key_states[VK_LSHIFT] || g_key_states[VK_RSHIFT]) ? 2.0f : 0.2f;
         float dx = 0, dy = 0, dz = 0;
-        /* Camera-relative movement using view matrix */
         D3DXVECTOR3 fwd(g_view_mat._13, g_view_mat._23, g_view_mat._33);
         D3DXVECTOR3 right(g_view_mat._11, g_view_mat._21, g_view_mat._31);
         D3DXVECTOR3 up(g_view_mat._12, g_view_mat._22, g_view_mat._32);
@@ -417,17 +402,23 @@ static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
         }
     }
 
-    return orig_EndScene(d);
+    return orig_Present(d, pSource, pDest, hDestOverride, pDirty);
 }
 
 static HRESULT WINAPI hk_Reset(IDirect3DDevice9 *d, D3DPRESENT_PARAMETERS *pp) {
-    menu_release_fonts();
+    if (g_imgui_ready) {
+        ImGui_ImplDX9_InvalidateDeviceObjects();
+    }
 
     g_sw = pp->BackBufferWidth;
     g_sh = pp->BackBufferHeight;
     LOG("Reset: %dx%d windowed=%d", g_sw, g_sh, pp->Windowed);
 
-    return orig_Reset(d, pp);
+    HRESULT hr = orig_Reset(d, pp);
+    if (SUCCEEDED(hr) && g_imgui_ready) {
+        ImGui_ImplDX9_CreateDeviceObjects();
+    }
+    return hr;
 }
 
 void hook_device(IDirect3DDevice9 *dev) {
@@ -442,6 +433,9 @@ void hook_device(IDirect3DDevice9 *dev) {
     memcpy(g_fake_vt, vt, sz);
     orig_EndScene = (HRESULT (WINAPI *)(IDirect3DDevice9*))g_fake_vt[42];
     g_fake_vt[42] = (void*)hk_EndScene;
+
+    orig_Present = (HRESULT (WINAPI *)(IDirect3DDevice9*, CONST RECT*, CONST RECT*, HWND, CONST RGNDATA*))g_fake_vt[17];
+    g_fake_vt[17] = (void*)hk_Present;
 
     orig_Reset = (HRESULT (WINAPI *)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*))g_fake_vt[16];
     g_fake_vt[16] = (void*)hk_Reset;
@@ -469,7 +463,8 @@ static HRESULT WINAPI hk_CreateDevice(IDirect3D9 *d3d, UINT Adapter, D3DDEVTYPE 
                                        HWND hWnd, DWORD Flags, D3DPRESENT_PARAMETERS *pp,
                                        IDirect3DDevice9 **ppDev) {
     g_sw = pp->BackBufferWidth; g_sh = pp->BackBufferHeight;
-    LOG("CreateDevice: %dx%d windowed=%d", g_sw, g_sh, pp->Windowed);
+    g_game_hwnd = hWnd;
+    LOG("CreateDevice: %dx%d windowed=%d hwnd=%p", g_sw, g_sh, pp->Windowed, hWnd);
     HRESULT hr = real_CreateDevice(d3d, Adapter, Type, hWnd, Flags, pp, ppDev);
     if (SUCCEEDED(hr) && ppDev && *ppDev) {
         LOG("Device: %p", *ppDev);
@@ -508,8 +503,21 @@ extern "C" __declspec(dllexport) HRESULT WINAPI Direct3DCreate9Ex(UINT sdk, IDir
     typedef HRESULT (WINAPI *fn)(UINT, IDirect3D9Ex**);
     fn f = NULL;
     char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
-    HMODULE h = GetModuleHandleA(path); if (h) f = (fn)GetProcAddress(h, "Direct3DCreate9Ex");
-    return f ? f(sdk, ex) : E_NOTIMPL;
+    HMODULE h = LoadLibraryA(path); if (h) f = (fn)GetProcAddress(h, "Direct3DCreate9Ex");
+    if (!f) return E_NOTIMPL;
+    HRESULT hr = f(sdk, ex);
+    if (SUCCEEDED(hr) && ex && *ex) {
+        LOG("Direct3DCreate9Ex -> %p", *ex);
+        void **vt = *(void***)*ex;
+        real_CreateDevice = (HRESULT (WINAPI *)(IDirect3D9*, UINT, D3DDEVTYPE, HWND,
+                                                  DWORD, D3DPRESENT_PARAMETERS*, IDirect3DDevice9**))vt[16];
+        DWORD old;
+        VirtualProtect(&vt[16], sizeof(void*), PAGE_READWRITE, &old);
+        vt[16] = (void*)hk_CreateDevice;
+        VirtualProtect(&vt[16], sizeof(void*), old, &old);
+        LOG("Direct3DCreate9Ex: CreateDevice hooked");
+    }
+    return hr;
 }
 
 extern "C" __declspec(dllexport) int WINAPI D3DPERF_BeginEvent(DWORD c, const WCHAR *n) {
@@ -1060,6 +1068,11 @@ void editor_move_selected(float dx, float dy, float dz) {
 }
 
 void hooks_cleanup(void) {
+    if (g_imgui_ready) {
+        menu_release_imgui();
+        g_imgui_ready = 0;
+    }
+
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
 

@@ -5,7 +5,6 @@
 #include <d3d9.h>
 
 void hook_device(IDirect3DDevice9 *dev);
-void hook_peekmessage(void);
 
 extern DWORD (WINAPI *real_GetTickCount)(void);
 extern BOOL (WINAPI *real_QueryPerformanceCounter)(LARGE_INTEGER*);
@@ -24,6 +23,8 @@ void editor_clear_selection(void);
 void editor_select_entity(int index);
 void hooks_cleanup(void);
 
+extern HWND g_game_hwnd;
+extern int g_imgui_ready;
 extern int g_v12_our_call;
 extern int g_editor_enabled;
 extern int g_editor_entity_count;
@@ -35,7 +36,6 @@ extern D3DVIEWPORT9 g_viewport;
 extern D3DMATRIX g_view_mat, g_proj_mat;
 extern int g_camera_valid;
 
-/* Editor free-fly camera */
 extern D3DMATRIX g_editor_view;
 extern float g_editor_cam_pos[3];
 extern float g_editor_cam_yaw, g_editor_cam_pitch;

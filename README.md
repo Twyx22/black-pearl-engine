@@ -44,11 +44,29 @@ Most addresses were found via Cheat Engine and are specific to the GOG/retail bu
 
 ### Build from Source
 
+**Linux (cross-compile):**
 ```bash
 sudo apt install g++-mingw-w64-i686
 make clean && make
 make install   # copies to game directory
 ```
+
+**Windows (MSYS2/MinGW):**
+1. Install [MSYS2](https://www.msys2.org/) (or via winget: `winget install MSYS2.MSYS2`)
+2. In MSYS2 MINGW32 shell, install the toolchain:
+   ```bash
+   pacman -S mingw-w64-i686-toolchain
+   ```
+3. Build:
+   ```bash
+   cd /path/to/black-pearl-engine
+   mingw32-make clean && mingw32-make
+   mingw32-make install   # copies to game directory
+   ```
+   Or use the `run` target to launch the game after install:
+   ```bash
+   mingw32-make run
+   ```
 
 ## Controls
 

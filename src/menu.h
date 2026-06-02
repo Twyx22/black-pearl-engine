@@ -2,7 +2,6 @@
 #define BPE_MENU_H
 
 #include <d3d9.h>
-#include <d3dx9.h>
 
 extern int g_menu_open;
 extern int g_sw, g_sh;
@@ -20,12 +19,13 @@ typedef struct { const char *name; Item *items; int count; } Tab;
 extern Tab tabs[];
 extern int g_sel, g_tab;
 
-void menu_init_fonts(IDirect3DDevice9 *d);
-void menu_release_fonts(void);
+void menu_init_imgui(IDirect3DDevice9 *d, HWND hwnd);
+void menu_release_imgui(void);
+void menu_toggle(void);
 void menu_update_input(void);
-void menu_render(IDirect3DDevice9 *d);
-void menu_render_overlay(IDirect3DDevice9 *d);
-void menu_render_debug(IDirect3DDevice9 *d);
+void menu_render(void);
+void menu_render_overlay(void);
+void menu_render_debug(void);
 
 int menu_should_be_ready(void);
 int menu_get_frame(void);

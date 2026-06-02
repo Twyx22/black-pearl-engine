@@ -4,6 +4,9 @@
 #include "input.h"
 #include "hooks.h"
 #include "config_loader.h"
+#include "imgui.h"
+#include "backends/imgui_impl_win32.h"
+#include "backends/imgui_impl_dx9.h"
 #include <stdio.h>
 
 int g_menu_open = 0;
@@ -11,8 +14,6 @@ int g_sw = 1280, g_sh = 720;
 IDirect3DDevice9 *g_dev = NULL;
 int g_sel = 0, g_tab = 0;
 
-static ID3DXFont *g_font = NULL;
-ID3DXFont *g_font_small = NULL;
 static int g_ready = 0, g_frame = 0;
 
 static void *g_editing_item_ptr = NULL;
@@ -77,20 +78,40 @@ Tab tabs[] = {
     {"Editor", editor_items, 1},
 };
 
-void menu_init_fonts(IDirect3DDevice9 *d) {
-    if (g_font) return;
-    D3DXCreateFontA(d, 16, 0, FW_BOLD, 0, FALSE, DEFAULT_CHARSET,
-                   OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
-                   "Arial", &g_font);
-    D3DXCreateFontA(d, 13, 0, FW_NORMAL, 0, FALSE, DEFAULT_CHARSET,
-                   OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
-                   "Arial", &g_font_small);
-    if (g_font) LOG("Fonts OK");
+void menu_init_imgui(IDirect3DDevice9 *d, HWND hwnd) {
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO &io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+    io.Fonts->AddFontDefault();
+
+    ImGui_ImplWin32_Init(hwnd);
+    ImGui_ImplDX9_Init(d);
+
+    ImGuiStyle &style = ImGui::GetStyle();
+    style.WindowRounding = 0.0f;
+    style.FrameRounding = 0.0f;
+    style.Colors[ImGuiCol_Text] = ImVec4(0.90f, 0.90f, 0.90f, 1.00f);
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.09f, 0.09f, 0.12f, 0.94f);
+    style.Colors[ImGuiCol_Border] = ImVec4(1.00f, 0.78f, 0.00f, 1.00f);
+
+    LOG("ImGui initialized");
 }
 
-void menu_release_fonts(void) {
-    if (g_font) { g_font->Release(); g_font = NULL; }
-    if (g_font_small) { g_font_small->Release(); g_font_small = NULL; }
+void menu_release_imgui(void) {
+    ImGui_ImplDX9_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+    LOG("ImGui shutdown");
+}
+
+void menu_toggle(void) {
+    int was_open = g_menu_open;
+    g_menu_open = !g_menu_open;
+    g_editing_item_ptr = NULL;
+    if (was_open && !g_menu_open) {
+        save_config();
+    }
 }
 
 static int key_pressed(int vk) {
@@ -101,14 +122,22 @@ static int key_pressed(int vk) {
 }
 
 void menu_update_input(void) {
-    if (key_pressed(VK_F1)) {
-        int was_open = g_menu_open;
-        g_menu_open = !g_menu_open;
-        g_editing_item_ptr = NULL;
-        if (was_open && !g_menu_open) {
-            save_config();
+    // Fallback: poll F1 directly via GetAsyncKeyState in case the game
+    // intercepts it via DirectInput before WndProc sees it.
+    {
+        static int prev_f1 = 0;
+        int cur_f1 = (GetAsyncKeyState(VK_F1) & 0x8000) ? 1 : 0;
+        if (cur_f1 && !prev_f1) {
+            LOG("menu_update_input: F1 detected via GetAsyncKeyState");
+            g_key_states[VK_F1] = 1;
         }
+        prev_f1 = cur_f1;
     }
+
+    if (key_pressed(VK_F1)) {
+        menu_toggle();
+    }
+
     if (!g_menu_open) {
         if (key_pressed(VK_F2)) g_cheats.show_debug = !g_cheats.show_debug;
         return;
@@ -131,9 +160,7 @@ void menu_update_input(void) {
             return;
         }
         if (key_pressed(VK_BACK)) {
-            if (g_edit_len > 0) {
-                g_edit_buf[--g_edit_len] = '\0';
-            }
+            if (g_edit_len > 0) g_edit_buf[--g_edit_len] = '\0';
             return;
         }
         for (int vk = '0'; vk <= '9'; vk++) {
@@ -190,90 +217,43 @@ static void update_fps(void) {
     if (now - g_fps_t >= 1000) { g_fps = g_fc; g_fc = 0; g_fps_t = now; }
 }
 
-typedef struct { float x, y, z, rhw; D3DCOLOR color; } Vertex;
-
-static void draw_rect(IDirect3DDevice9 *d, float x, float y, float w, float h, D3DCOLOR c) {
-    DWORD old_fvf;
-    IDirect3DVertexShader9 *old_vs = NULL;
-    IDirect3DPixelShader9 *old_ps = NULL;
-    DWORD old_ablend, old_srcblend, old_destblend, old_zenable, old_zwrite;
-
-    d->GetFVF(&old_fvf);
-    d->GetVertexShader(&old_vs);
-    d->GetPixelShader(&old_ps);
-    d->GetRenderState(D3DRS_ALPHABLENDENABLE, &old_ablend);
-    d->GetRenderState(D3DRS_SRCBLEND, &old_srcblend);
-    d->GetRenderState(D3DRS_DESTBLEND, &old_destblend);
-    d->GetRenderState(D3DRS_ZENABLE, &old_zenable);
-    d->GetRenderState(D3DRS_ZWRITEENABLE, &old_zwrite);
-
-    d->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-    d->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-    d->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-    d->SetRenderState(D3DRS_ZENABLE, FALSE);
-    d->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
-    d->SetVertexShader(NULL);
-    d->SetPixelShader(NULL);
-
-    Vertex v[4] = {
-        {x,   y,   0, 1, c},
-        {x+w, y,   0, 1, c},
-        {x,   y+h, 0, 1, c},
-        {x+w, y+h, 0, 1, c}
-    };
-    d->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
-    d->SetTexture(0, NULL);
-    d->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(Vertex));
-
-    d->SetRenderState(D3DRS_ALPHABLENDENABLE, old_ablend);
-    d->SetRenderState(D3DRS_SRCBLEND, old_srcblend);
-    d->SetRenderState(D3DRS_DESTBLEND, old_destblend);
-    d->SetRenderState(D3DRS_ZENABLE, old_zenable);
-    d->SetRenderState(D3DRS_ZWRITEENABLE, old_zwrite);
-    d->SetVertexShader(old_vs);
-    d->SetPixelShader(old_ps);
-    d->SetFVF(old_fvf);
-
-    if (old_vs) old_vs->Release();
-    if (old_ps) old_ps->Release();
-}
-
-void menu_render(IDirect3DDevice9 *d) {
-    if (!g_menu_open || !g_font || !g_font_small) return;
+void menu_render(void) {
+    if (!g_menu_open) return;
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
     int sw = g_sw, sh = g_sh;
     int mx = (sw - MENU_W) / 2, my = (sh - MENU_H) / 2;
 
-    for (int i = 1; i <= 4; i++) {
-        draw_rect(d, (float)(mx + i), (float)(my + i), (float)MENU_W, (float)MENU_H, 0x40000000);
-    }
+    for (int i = 1; i <= 4; i++)
+        dl->AddRectFilled(ImVec2((float)(mx+i), (float)(my+i)), ImVec2((float)(mx+i+MENU_W), (float)(my+i+MENU_H)), IM_COL32(0,0,0,64));
 
-    draw_rect(d, (float)mx, (float)my, (float)MENU_W, (float)MENU_H, 0xF0181818);
-    draw_rect(d, (float)mx, (float)my, (float)MENU_W, 1, 0xFFFFC800);
-    draw_rect(d, (float)mx, (float)my + MENU_H - 1, (float)MENU_W, 1, 0xFFFFC800);
-    draw_rect(d, (float)mx, (float)my, 1, (float)MENU_H, 0xFFFFC800);
-    draw_rect(d, (float)mx + MENU_W - 1, (float)my, 1, (float)MENU_H, 0xFFFFC800);
+    dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+MENU_H)), IM_COL32(24,24,24,240));
+    dl->AddRect(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+MENU_H)), IM_COL32(255,200,0,255));
 
-    draw_rect(d, (float)mx, (float)my, (float)MENU_W, 36, 0xFFFFC800);
-    draw_rect(d, (float)mx, (float)my + 34, (float)MENU_W, 2, 0xFFD4A000);
+    dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+36)), IM_COL32(255,200,0,255));
+    dl->AddRectFilled(ImVec2((float)mx, (float)(my+34)), ImVec2((float)(mx+MENU_W), (float)(my+36)), IM_COL32(212,160,0,255));
 
-    RECT r = {mx, my, mx+MENU_W, my+36};
-    g_font->DrawTextA(NULL, MOD_NAME " " MOD_VER, -1, &r, DT_CENTER | DT_VCENTER, 0xFF000000);
+    const char *title = MOD_NAME " " MOD_VER;
+    ImVec2 ts = ImGui::CalcTextSize(title);
+    dl->AddText(ImVec2((float)(mx + (MENU_W - (int)ts.x) / 2), (float)(my + (36 - (int)ts.y) / 2)), IM_COL32(0,0,0,255), title);
 
     float tw = (float)MENU_W / TAB_COUNT;
     int tab_y = my + 40;
     for (int i = 0; i < TAB_COUNT; i++) {
         int tx = mx + (int)(i * tw);
-        RECT tr = {tx, tab_y, tx+(int)tw, tab_y+24};
         if (i == g_tab) {
-            draw_rect(d, (float)(tx + 4), (float)(tab_y + 2), (float)(tw - 8), 22, 0x60FFC800);
-            draw_rect(d, (float)(tx + 4), (float)(tab_y + 22), (float)(tw - 8), 2, 0xFFFFC800);
-            g_font_small->DrawTextA(NULL, tabs[i].name, -1, &tr, DT_CENTER | DT_VCENTER, 0xFFFFC800);
+            dl->AddRectFilled(ImVec2((float)(tx+4), (float)(tab_y+2)), ImVec2((float)(tx+(int)tw-4), (float)(tab_y+24)), IM_COL32(96,255,200,0));
+            dl->AddRectFilled(ImVec2((float)(tx+4), (float)(tab_y+22)), ImVec2((float)(tx+(int)tw-4), (float)(tab_y+24)), IM_COL32(255,200,0,255));
+            const char *tn = tabs[i].name;
+            ImVec2 tns = ImGui::CalcTextSize(tn);
+            dl->AddText(ImVec2((float)(tx + ((int)tw - (int)tns.x) / 2), (float)(tab_y + (24 - (int)tns.y) / 2)), IM_COL32(255,200,0,255), tn);
         } else {
-            g_font_small->DrawTextA(NULL, tabs[i].name, -1, &tr, DT_CENTER | DT_VCENTER, 0xFF909090);
+            const char *tn = tabs[i].name;
+            ImVec2 tns = ImGui::CalcTextSize(tn);
+            dl->AddText(ImVec2((float)(tx + ((int)tw - (int)tns.x) / 2), (float)(tab_y + (24 - (int)tns.y) / 2)), IM_COL32(144,144,144,255), tn);
         }
     }
 
-    draw_rect(d, (float)(mx + 8), (float)(tab_y + 26), (float)(MENU_W - 16), 1, 0xFF404040);
+    dl->AddRectFilled(ImVec2((float)(mx+8), (float)(tab_y+26)), ImVec2((float)(mx+MENU_W-8), (float)(tab_y+27)), IM_COL32(64,64,64,255));
 
     Tab *cur = &tabs[g_tab];
     int items_y = tab_y + 32;
@@ -282,103 +262,101 @@ void menu_render(IDirect3DDevice9 *d) {
         Item *it = &cur->items[i];
 
         if (it->type == 3) {
-            /* Separator */
-            draw_rect(d, (float)(mx + 16), (float)(iy + ITEM_H/2), (float)(MENU_W - 32), 1, 0xFF505050);
+            dl->AddRectFilled(ImVec2((float)(mx+16), (float)(iy+ITEM_H/2)), ImVec2((float)(mx+MENU_W-16), (float)(iy+ITEM_H/2+1)), IM_COL32(80,80,80,255));
             continue;
         }
 
-        if (i % 2 == 0) {
-            draw_rect(d, (float)(mx + 8), (float)iy, (float)(MENU_W - 16), (float)ITEM_H, 0x20FFFFFF);
-        }
+        if (i % 2 == 0)
+            dl->AddRectFilled(ImVec2((float)(mx+8), (float)iy), ImVec2((float)(mx+MENU_W-8), (float)(iy+ITEM_H)), IM_COL32(255,255,255,32));
 
         if (i == g_sel) {
-            draw_rect(d, (float)(mx + 4), (float)iy, 3, (float)ITEM_H, 0xFFFFC800);
-            draw_rect(d, (float)(mx + 8), (float)iy, (float)(MENU_W - 16), (float)ITEM_H, 0x30FFC800);
+            dl->AddRectFilled(ImVec2((float)(mx+4), (float)iy), ImVec2((float)(mx+7), (float)(iy+ITEM_H)), IM_COL32(255,200,0,255));
+            dl->AddRectFilled(ImVec2((float)(mx+8), (float)iy), ImVec2((float)(mx+MENU_W-8), (float)(iy+ITEM_H)), IM_COL32(255,200,0,48));
         }
 
-        RECT ir = {mx+18, iy, mx+MENU_W-80, iy+ITEM_H};
-        D3DCOLOR text_c = (i == g_sel) ? 0xFFFFFFFF : 0xFFC8C8C8;
-        g_font_small->DrawTextA(NULL, it->name, -1, &ir, DT_LEFT | DT_VCENTER, text_c);
+        ImU32 text_c = (i == g_sel) ? IM_COL32(255,255,255,255) : IM_COL32(200,200,200,255);
+        dl->AddText(ImVec2((float)(mx+18), (float)(iy + (ITEM_H - (int)ImGui::CalcTextSize(it->name).y) / 2)), text_c, it->name);
 
         if (it->type == 2) {
             int btn_x = mx + MENU_W - 80;
-            draw_rect(d, (float)btn_x, (float)(iy + 3), 64, (float)(ITEM_H - 6), 0xFFC8A000);
-            RECT br = {btn_x, iy, btn_x+64, iy+ITEM_H};
-            g_font_small->DrawTextA(NULL, "> EXEC", -1, &br, DT_CENTER | DT_VCENTER, 0xFF000000);
+            dl->AddRectFilled(ImVec2((float)btn_x, (float)(iy+3)), ImVec2((float)(btn_x+64), (float)(iy+ITEM_H-3)), IM_COL32(200,160,0,255));
+            const char *btn = "> EXEC";
+            ImVec2 bs = ImGui::CalcTextSize(btn);
+            dl->AddText(ImVec2((float)(btn_x + (64 - (int)bs.x) / 2), (float)(iy + (ITEM_H - (int)bs.y) / 2)), IM_COL32(0,0,0,255), btn);
         } else if (it->type == 0 && it->val) {
             int val = *(int*)it->val;
             int toggle_x = mx + MENU_W - 70;
             int toggle_y = iy + 4;
             int toggle_w = 50;
             int toggle_h = ITEM_H - 8;
-
             if (val) {
-                draw_rect(d, (float)toggle_x, (float)toggle_y, (float)toggle_w, (float)toggle_h, 0xFF00AA00);
-                RECT tr = {toggle_x, toggle_y, toggle_x+toggle_w, toggle_y+toggle_h};
-                g_font_small->DrawTextA(NULL, "ON", -1, &tr, DT_CENTER | DT_VCENTER, 0xFFFFFFFF);
+                dl->AddRectFilled(ImVec2((float)toggle_x, (float)toggle_y), ImVec2((float)(toggle_x+toggle_w), (float)(toggle_y+toggle_h)), IM_COL32(0,170,0,255));
+                dl->AddText(ImVec2((float)(toggle_x + (toggle_w - (int)ImGui::CalcTextSize("ON").x) / 2), (float)(toggle_y + (toggle_h - (int)ImGui::CalcTextSize("ON").y) / 2)), IM_COL32(255,255,255,255), "ON");
             } else {
-                draw_rect(d, (float)toggle_x, (float)toggle_y, (float)toggle_w, (float)toggle_h, 0xFF444444);
-                RECT tr = {toggle_x, toggle_y, toggle_x+toggle_w, toggle_y+toggle_h};
-                g_font_small->DrawTextA(NULL, "OFF", -1, &tr, DT_CENTER | DT_VCENTER, 0xFF888888);
+                dl->AddRectFilled(ImVec2((float)toggle_x, (float)toggle_y), ImVec2((float)(toggle_x+toggle_w), (float)(toggle_y+toggle_h)), IM_COL32(68,68,68,255));
+                dl->AddText(ImVec2((float)(toggle_x + (toggle_w - (int)ImGui::CalcTextSize("OFF").x) / 2), (float)(toggle_y + (toggle_h - (int)ImGui::CalcTextSize("OFF").y) / 2)), IM_COL32(136,136,136,255), "OFF");
             }
         } else if (it->type == 1 && it->val) {
             if (g_editing_item_ptr == it) {
                 int edit_x = mx + MENU_W - 130;
-                draw_rect(d, (float)edit_x, (float)(iy + 2), 120, (float)(ITEM_H - 4), 0xFF0A0A0A);
-                draw_rect(d, (float)edit_x, (float)(iy + 2), 120, 1, 0xFFFFC800);
-                draw_rect(d, (float)edit_x, (float)(iy + ITEM_H - 5), 120, 1, 0xFFFFC800);
+                dl->AddRectFilled(ImVec2((float)edit_x, (float)(iy+2)), ImVec2((float)(edit_x+120), (float)(iy+ITEM_H-2)), IM_COL32(10,10,10,255));
+                dl->AddRectFilled(ImVec2((float)edit_x, (float)(iy+2)), ImVec2((float)(edit_x+120), (float)(iy+3)), IM_COL32(255,200,0,255));
+                dl->AddRectFilled(ImVec2((float)edit_x, (float)(iy+ITEM_H-3)), ImVec2((float)(edit_x+120), (float)(iy+ITEM_H-2)), IM_COL32(255,200,0,255));
                 char buf[48];
                 int show_cursor = ((GetTickCount() - g_edit_cursor_t) / 500) % 2;
                 snprintf(buf, sizeof(buf), "%s%s", g_edit_buf, show_cursor ? "_" : "");
-                RECT vr = {edit_x + 4, iy, mx+MENU_W-8, iy+ITEM_H};
-                g_font_small->DrawTextA(NULL, buf, -1, &vr, DT_RIGHT | DT_VCENTER, 0xFFFFC800);
+                ImVec2 es = ImGui::CalcTextSize(buf);
+                dl->AddText(ImVec2((float)(edit_x + 116 - (int)es.x), (float)(iy + (ITEM_H - (int)es.y) / 2)), IM_COL32(255,200,0,255), buf);
             } else {
                 int val = *(int*)it->val;
                 char buf[32]; snprintf(buf, sizeof(buf), "%d", val);
                 int val_w = 80;
                 int val_x = mx + MENU_W - val_w - 8;
-                draw_rect(d, (float)val_x, (float)(iy + 4), (float)val_w, (float)(ITEM_H - 8), 0x30FFFFFF);
-                RECT vr = {val_x, iy, val_x+val_w, iy+ITEM_H};
-                g_font_small->DrawTextA(NULL, buf, -1, &vr, DT_CENTER | DT_VCENTER, 0xFFFFC800);
+                dl->AddRectFilled(ImVec2((float)val_x, (float)(iy+4)), ImVec2((float)(val_x+val_w), (float)(iy+ITEM_H-4)), IM_COL32(255,255,255,48));
+                ImVec2 vs = ImGui::CalcTextSize(buf);
+                dl->AddText(ImVec2((float)(val_x + (val_w - (int)vs.x) / 2), (float)(iy + (ITEM_H - (int)vs.y) / 2)), IM_COL32(255,200,0,255), buf);
             }
         }
     }
 
     int foot_y = my + MENU_H - 24;
-    draw_rect(d, (float)(mx + 8), (float)(foot_y - 4), (float)(MENU_W - 16), 1, 0xFF404040);
-    RECT fr = {mx, foot_y, mx+MENU_W, foot_y+20};
-    g_font_small->DrawTextA(NULL, "ENTER: Toggle/Edit  |  ARROWS: Navigate  |  ESC: Cancel Edit", -1, &fr, DT_CENTER | DT_VCENTER, 0xFF808080);
+    dl->AddRectFilled(ImVec2((float)(mx+8), (float)(foot_y-4)), ImVec2((float)(mx+MENU_W-8), (float)(foot_y-3)), IM_COL32(64,64,64,255));
+    const char *foot = "ENTER: Toggle/Edit  |  ARROWS: Navigate  |  ESC: Cancel Edit";
+    ImVec2 fs = ImGui::CalcTextSize(foot);
+    dl->AddText(ImVec2((float)(mx + (MENU_W - (int)fs.x) / 2), (float)foot_y), IM_COL32(128,128,128,255), foot);
 }
 
-void menu_render_overlay(IDirect3DDevice9 *d) {
-    if (!g_font_small) return;
+void menu_render_overlay(void) {
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    const char *s = MOD_NAME " " MOD_VER " | F1: Menu | F2: Debug";
     int sw = g_sw; if (sw < 1) sw = 1280;
-
-    RECT r = {0, 0, sw, 22};
-    g_font_small->DrawTextA(NULL, MOD_NAME " " MOD_VER " | F1: Menu | F2: Debug",
-                             -1, &r, DT_CENTER | DT_VCENTER, 0xFFFFC800);
+    ImVec2 ss = ImGui::CalcTextSize(s);
+    dl->AddText(ImVec2((float)((sw - (int)ss.x) / 2), 2.0f), IM_COL32(255,200,0,255), s);
 
     if (g_cheats.show_fps) {
         char buf[32]; snprintf(buf, sizeof(buf), "FPS: %d", g_fps);
-        RECT fr = {0, 25, sw-10, 45};
-        g_font_small->DrawTextA(NULL, buf, -1, &fr, DT_RIGHT | DT_VCENTER, 0xFF00FF64);
+        ImVec2 fs = ImGui::CalcTextSize(buf);
+        dl->AddText(ImVec2((float)(sw - (int)fs.x - 10.0f), 25.0f), IM_COL32(0,255,100,255), buf);
     }
 }
 
-void menu_render_debug(IDirect3DDevice9 *d) {
-    if (!g_cheats.show_debug || !g_font_small) return;
+void menu_render_debug(void) {
+    if (!g_cheats.show_debug) return;
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
     int sw = g_sw, sh = g_sh;
     int pw = 360, px = sw - pw - 10, py = 30;
 
-    draw_rect(d, (float)px, (float)py, (float)pw, 340, 0xD8000000);
-    draw_rect(d, (float)px, (float)py, (float)pw, 2, 0xFFFFC800);
+    dl->AddRectFilled(ImVec2((float)px, (float)py), ImVec2((float)(px+pw), (float)(py+340)), IM_COL32(0,0,0,216));
+    dl->AddRectFilled(ImVec2((float)px, (float)py), ImVec2((float)(px+pw), (float)(py+2)), IM_COL32(255,200,0,255));
 
-    RECT tr = {px, py, px+pw, py+20};
-    g_font_small->DrawTextA(NULL, "=== GAME STRINGS ===", -1, &tr, DT_CENTER, 0xFFFFC800);
+    const char *hdr = "=== GAME STRINGS ===";
+    ImVec2 hs = ImGui::CalcTextSize(hdr);
+    dl->AddText(ImVec2((float)(px + (pw - (int)hs.x) / 2), (float)py), IM_COL32(255,200,0,255), hdr);
 
     if (g_entity_count <= 0) {
-        RECT er = {px, py+25, px+pw, py+45};
-        g_font_small->DrawTextA(NULL, "No entities found", -1, &er, DT_CENTER, 0xFFE63C3C);
+        const char *msg = "No entities found";
+        ImVec2 ms = ImGui::CalcTextSize(msg);
+        dl->AddText(ImVec2((float)(px + (pw - (int)ms.x) / 2), (float)(py+25)), IM_COL32(230,60,60,255), msg);
         return;
     }
 
@@ -392,9 +370,8 @@ void menu_render_debug(IDirect3DDevice9 *d) {
         const char *str = g_entities[idx];
         if (!str) continue;
         char buf[56]; snprintf(buf, sizeof(buf), "%d: %s", idx, str);
-        RECT sr = {px+6, y, px+pw-6, y+16};
-        D3DCOLOR c = (i == 0) ? 0xFFFFC800 : 0xFFB4B4B4;
-        g_font_small->DrawTextA(NULL, buf, -1, &sr, DT_LEFT | DT_VCENTER, c);
+        ImU32 c2 = (i == 0) ? IM_COL32(255,200,0,255) : IM_COL32(180,180,180,255);
+        dl->AddText(ImVec2((float)(px+6), (float)y), c2, buf);
         y += 16;
     }
 }

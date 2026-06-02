@@ -111,8 +111,15 @@ static HRESULT WINAPI hk_DirectInput8Create(HINSTANCE hinst, DWORD dwVersion, RE
 }
 
 static LRESULT CALLBACK hk_keyboard_proc(int nCode, WPARAM wParam, LPARAM lParam) {
-    if (nCode >= 0 && g_menu_open) {
-        return 1;
+    // We no longer block here; WndProc handles blocking when the menu is open.
+    // This hook is kept only as a fallback to update g_key_states if WndProc
+    // somehow misses a message (should not happen in practice).
+    if (nCode >= 0) {
+        int vk = (int)wParam;
+        BOOL keyDown = !(lParam & (1 << 31));
+        if (vk >= 0 && vk < 256) {
+            g_key_states[vk] = keyDown ? 1 : 0;
+        }
     }
     return CallNextHookEx(g_kb_hook, nCode, wParam, lParam);
 }
@@ -128,9 +135,9 @@ static LRESULT CALLBACK hk_keyboard_ll_proc(int nCode, WPARAM wParam, LPARAM lPa
             if (vk >= 0 && vk < 256) g_key_states[vk] = 0;
         }
 
-        if (g_menu_open) {
-            return 1;
-        }
+        // Do NOT block here -- WndProc is the single place that decides
+        // whether to swallow a message. Blocking in the LL hook would
+        // prevent WndProc from ever seeing the key.
     }
     return CallNextHookEx(g_kb_ll_hook, nCode, wParam, lParam);
 }
