@@ -18,13 +18,11 @@ BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID reserved) {
             }
             load_config();
             install_time_hooks();
-            install_level_editor_hook();
             MH_EnableHook(MH_ALL_HOOKS);
             return TRUE;
         case DLL_PROCESS_DETACH:
             save_config();
             input_cleanup();
-            hooks_cleanup();
             break;
     }
     return TRUE;

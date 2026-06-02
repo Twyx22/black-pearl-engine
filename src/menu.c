@@ -3,6 +3,7 @@
 #include "cheats.h"
 #include "input.h"
 #include "hooks.h"
+#include "uw.h"
 #include "config_loader.h"
 #include "imgui.h"
 #include "backends/imgui_impl_win32.h"
@@ -43,39 +44,44 @@ static Item fun_items[] = {
     {"NoClip", 0, &g_cheats.noclip},
     {"Time Freeze", 0, &g_cheats.time_freeze},
 };
-static void editor_toggle(void) {
-    g_editor_enabled = !g_editor_enabled;
-    if (!g_editor_enabled) {
-        g_editor_cam_initialized = 0;
-        g_settransform_log_count = 0;
-        g_shader_const_log_count = 0;
-    } else {
-        g_proj_captured = 0;
-        g_extra_saved = 0;
-    }
-    LOG("editor_toggle: g_editor_enabled=%d cam_init=%d le=%p", g_editor_enabled, g_editor_cam_initialized, get_level_editor());
-    if (g_editor_enabled) {
-        LOG("editor_toggle: sending 0xB22 (entity selection)");
-        le_send_message(0xb22, NULL);
-    }
-}
-static void editor_toggle_cycle(void) { g_editor_auto_cycle = !g_editor_auto_cycle; }
-
 static Item visual_items[] = {
     {"FPS Counter", 0, &g_cheats.show_fps},
     {"Debug Info (F2)", 0, &g_cheats.show_debug},
 };
 
-static Item editor_items[] = {
-    {"Launch Editor Mode", 2, NULL, 0, 0, editor_toggle},
+static Item uw_items[] = {
+    {"Enable Ultra-Wide", 0, &g_cheats.uw_enabled},
+    {"  Ratio: Auto", 0, NULL},
+    {"  Ratio: 16:9", 0, NULL},
+    {"  Ratio: 21:9", 0, NULL},
+    {"  Ratio: 32:9", 0, NULL},
 };
 
+static int uw_items_cb(int sel) {
+    if (sel == 0) {
+        g_cheats.uw_enabled = !g_cheats.uw_enabled;
+        g_uw_enabled = g_cheats.uw_enabled;
+        if (g_uw_enabled) uw_apply_patches(); else uw_remove_patches();
+        if (g_menu_open) save_config();
+        return 1;
+    }
+    int ratios[] = {UW_RATIO_AUTO, UW_RATIO_16_9, UW_RATIO_21_9, UW_RATIO_32_9};
+    int idx = sel - 1;
+    if (idx >= 0 && idx < 4) {
+        g_cheats.uw_ratio = ratios[idx];
+        g_uw_ratio_mode = ratios[idx];
+        uw_set_ratio(ratios[idx]);
+        if (g_menu_open) save_config();
+    }
+    return 1;
+}
+
 Tab tabs[] = {
-    {"Health", health_items, 4},
-    {"Studs", stud_items, 7},
-    {"Fun", fun_items, 5},
-    {"Visual", visual_items, 2},
-    {"Editor", editor_items, 1},
+    {"Health", health_items, 4, NULL},
+    {"Studs", stud_items, 7, NULL},
+    {"Fun", fun_items, 5, NULL},
+    {"Visual", visual_items, 2, NULL},
+    {"UltraWide", uw_items, 5, uw_items_cb},
 };
 
 void menu_init_imgui(IDirect3DDevice9 *d, HWND hwnd) {
@@ -121,7 +127,22 @@ static int key_pressed(int vk) {
     return press;
 }
 
+static void uw_sync_state(void) {
+    static int prev_enabled = 0, prev_ratio = -1;
+    if (g_cheats.uw_enabled != prev_enabled) {
+        prev_enabled = g_cheats.uw_enabled;
+        g_uw_enabled = g_cheats.uw_enabled;
+        if (g_uw_enabled) uw_apply_patches(); else uw_remove_patches();
+    }
+    if (g_cheats.uw_ratio != prev_ratio) {
+        prev_ratio = g_cheats.uw_ratio;
+        g_uw_ratio_mode = g_cheats.uw_ratio;
+        if (g_uw_enabled) uw_set_ratio(g_uw_ratio_mode);
+    }
+}
+
 void menu_update_input(void) {
+    uw_sync_state();
     // Fallback: poll F1 directly via GetAsyncKeyState in case the game
     // intercepts it via DirectInput before WndProc sees it.
     {
@@ -193,7 +214,9 @@ void menu_update_input(void) {
     if (key_pressed(VK_LEFT))  { g_tab = (g_tab - 1 + TAB_COUNT) % TAB_COUNT; g_sel = 0; }
     if (key_pressed(VK_RIGHT)) { g_tab = (g_tab + 1) % TAB_COUNT; g_sel = 0; }
     if (key_pressed(VK_RETURN)) {
-        Item *it = &tabs[g_tab].items[g_sel];
+        Tab *cur_tab = &tabs[g_tab];
+        if (cur_tab->on_select && cur_tab->on_select(g_sel)) return;
+        Item *it = &cur_tab->items[g_sel];
         if (it->type == 3) return; /* separator */
         if (it->type == 2 && it->action) {
             it->action();
@@ -227,7 +250,10 @@ void menu_render(void) {
         dl->AddRectFilled(ImVec2((float)(mx+i), (float)(my+i)), ImVec2((float)(mx+i+MENU_W), (float)(my+i+MENU_H)), IM_COL32(0,0,0,64));
 
     dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+MENU_H)), IM_COL32(24,24,24,240));
-    dl->AddRect(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+MENU_H)), IM_COL32(255,200,0,255));
+    dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+1)), IM_COL32(255,200,0,255));
+    dl->AddRectFilled(ImVec2((float)mx, (float)(my+MENU_H-1)), ImVec2((float)(mx+MENU_W), (float)(my+MENU_H)), IM_COL32(255,200,0,255));
+    dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+1), (float)(my+MENU_H)), IM_COL32(255,200,0,255));
+    dl->AddRectFilled(ImVec2((float)(mx+MENU_W-1), (float)my), ImVec2((float)(mx+MENU_W), (float)(my+MENU_H)), IM_COL32(255,200,0,255));
 
     dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+36)), IM_COL32(255,200,0,255));
     dl->AddRectFilled(ImVec2((float)mx, (float)(my+34)), ImVec2((float)(mx+MENU_W), (float)(my+36)), IM_COL32(212,160,0,255));
@@ -296,6 +322,19 @@ void menu_render(void) {
                 dl->AddRectFilled(ImVec2((float)toggle_x, (float)toggle_y), ImVec2((float)(toggle_x+toggle_w), (float)(toggle_y+toggle_h)), IM_COL32(68,68,68,255));
                 dl->AddText(ImVec2((float)(toggle_x + (toggle_w - (int)ImGui::CalcTextSize("OFF").x) / 2), (float)(toggle_y + (toggle_h - (int)ImGui::CalcTextSize("OFF").y) / 2)), IM_COL32(136,136,136,255), "OFF");
             }
+        } else if (it->type == 0 && !it->val && g_tab == 4) {
+            int rw = 16;
+            int rx = mx + MENU_W - 30;
+            int ry = iy + (ITEM_H - rw) / 2;
+            int selected = 0;
+            if (i == 1) selected = (g_uw_ratio_mode == UW_RATIO_AUTO);
+            else if (i == 2) selected = (g_uw_ratio_mode == UW_RATIO_16_9);
+            else if (i == 3) selected = (g_uw_ratio_mode == UW_RATIO_21_9);
+            else if (i == 4) selected = (g_uw_ratio_mode == UW_RATIO_32_9);
+            if (selected) {
+                dl->AddRectFilled(ImVec2((float)(rx+2), (float)(ry+2)), ImVec2((float)(rx+rw-2), (float)(ry+rw-2)), IM_COL32(255,200,0,255));
+            }
+            dl->AddRect(ImVec2((float)rx, (float)ry), ImVec2((float)(rx+rw), (float)(ry+rw)), IM_COL32(200,200,200,255));
         } else if (it->type == 1 && it->val) {
             if (g_editing_item_ptr == it) {
                 int edit_x = mx + MENU_W - 130;

@@ -8,7 +8,7 @@ extern int g_sw, g_sh;
 extern IDirect3DDevice9 *g_dev;
 
 typedef struct { const char *name; int type; void *val; int min, max; void (*action)(void); } Item;
-typedef struct { const char *name; Item *items; int count; } Tab;
+typedef struct { const char *name; Item *items; int count; int (*on_select)(int sel); } Tab;
 
 #define MENU_W 480
 #define MENU_H 440

@@ -11,6 +11,8 @@ typedef struct {
     int custom_stud_value;
     int force_golden_bricks;
     int golden_brick_value;
+    int uw_enabled;
+    int uw_ratio;
 } CheatsState;
 
 extern CheatsState g_cheats;

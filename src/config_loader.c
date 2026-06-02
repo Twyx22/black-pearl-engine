@@ -25,6 +25,8 @@ static ConfigMapping g_map[] = {
     {"custom_stud_value",   &g_cheats.custom_stud_value},
     {"force_golden_bricks", &g_cheats.force_golden_bricks},
     {"golden_brick_value",  &g_cheats.golden_brick_value},
+    {"uw_enabled",          &g_cheats.uw_enabled},
+    {"uw_ratio",            &g_cheats.uw_ratio},
 };
 
 #define MAP_COUNT (sizeof(g_map) / sizeof(g_map[0]))
