@@ -256,6 +256,35 @@ extern "C" __declspec(dllexport) int WINAPI D3DPERF_EndEvent(void) {
     return f ? f() : 0;
 }
 
+/* LevelEditor constructor hook */
+typedef void* (__fastcall *LevelEditorCtor_t)(void* thisptr, void* edx);
+static LevelEditorCtor_t real_LevelEditor_ctor = NULL;
+static void* g_level_editor = NULL;
+
+static void* __fastcall hk_LevelEditor_ctor(void* thisptr, void* edx) {
+    void* ret = real_LevelEditor_ctor(thisptr, edx);
+    g_level_editor = ret;
+    LOG("LevelEditor::LevelEditor(this=%p) -> %p", thisptr, ret);
+    return ret;
+}
+
+void install_level_editor_hook(void) {
+    if (real_LevelEditor_ctor) return;
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    LPVOID target = (LPVOID)(base + LEVEL_EDITOR_CTOR_OFFSET);
+    MH_STATUS st = MH_CreateHook(target, (LPVOID)hk_LevelEditor_ctor, (void**)&real_LevelEditor_ctor);
+    if (st == MH_OK) {
+        MH_EnableHook(target);
+        LOG("LevelEditor hook installed at %p", target);
+    } else {
+        LOG("LevelEditor hook FAILED at %p (err=%d)", target, (int)st);
+    }
+}
+
+void* get_level_editor(void) {
+    return g_level_editor;
+}
+
 void hooks_cleanup(void) {
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();

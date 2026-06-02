@@ -14,6 +14,8 @@ extern LONGLONG g_freeze_perf;
 void install_time_hooks(void);
 void time_freeze_snapshot(void);
 
+void install_level_editor_hook(void);
+void* get_level_editor(void);
 void hooks_cleanup(void);
 
 #endif

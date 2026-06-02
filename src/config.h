@@ -91,6 +91,11 @@
 #define DIDEV_VT_ACQUIRE            7
 #define DIDEV_VT_UNACQUIRE          8
 
+/* --- LevelEditor --- */
+
+/* Constructor offset for LevelEditor class (Ghidra: 0x0058eb50, offset = 0x58eb50 - 0x400000) */
+#define LEVEL_EDITOR_CTOR_OFFSET    0x18EB50
+
 /* --- Menu Settings --- */
 
 #define MENU_DEFAULT_WIDTH      480
