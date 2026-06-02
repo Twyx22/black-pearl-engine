@@ -8,13 +8,13 @@ extern int g_menu_open;
 extern int g_sw, g_sh;
 extern IDirect3DDevice9 *g_dev;
 
-typedef struct { const char *name; int type; void *val; int min, max; } Item;
+typedef struct { const char *name; int type; void *val; int min, max; void (*action)(void); } Item;
 typedef struct { const char *name; Item *items; int count; } Tab;
 
 #define MENU_W 480
 #define MENU_H 440
 #define ITEM_H 24
-#define TAB_COUNT 4
+#define TAB_COUNT 5
 
 extern Tab tabs[];
 extern int g_sel, g_tab;

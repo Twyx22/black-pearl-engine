@@ -2,6 +2,7 @@
 #include "utils.h"
 #include "cheats.h"
 #include "input.h"
+#include "hooks.h"
 #include "config_loader.h"
 #include <stdio.h>
 
@@ -41,9 +42,17 @@ static Item fun_items[] = {
     {"NoClip", 0, &g_cheats.noclip},
     {"Time Freeze", 0, &g_cheats.time_freeze},
 };
+static void editor_send_b22(void) { le_send_message(0xb22, NULL); }
+static void editor_send_e10(void) { le_send_message(0xe10, NULL); }
+
 static Item visual_items[] = {
     {"FPS Counter", 0, &g_cheats.show_fps},
     {"Debug Info (F2)", 0, &g_cheats.show_debug},
+};
+
+static Item editor_items[] = {
+    {"Send 0xb22 (Select)", 2, NULL, 0, 0, editor_send_b22},
+    {"Send 0xe10 (Toggle)", 2, NULL, 0, 0, editor_send_e10},
 };
 
 Tab tabs[] = {
@@ -51,6 +60,7 @@ Tab tabs[] = {
     {"Studs", stud_items, 7},
     {"Fun", fun_items, 5},
     {"Visual", visual_items, 2},
+    {"Editor", editor_items, 2},
 };
 
 void menu_init_fonts(IDirect3DDevice9 *d) {
@@ -135,7 +145,9 @@ void menu_update_input(void) {
     if (key_pressed(VK_RIGHT)) { g_tab = (g_tab + 1) % TAB_COUNT; g_sel = 0; }
     if (key_pressed(VK_RETURN)) {
         Item *it = &tabs[g_tab].items[g_sel];
-        if (it->type == 0 && it->val) {
+        if (it->type == 2 && it->action) {
+            it->action();
+        } else if (it->type == 0 && it->val) {
             *(int*)it->val = !*(int*)it->val;
         } else if (it->type == 1 && it->val) {
             g_editing_item_ptr = it;
@@ -259,7 +271,12 @@ void menu_render(IDirect3DDevice9 *d) {
         D3DCOLOR text_c = (i == g_sel) ? 0xFFFFFFFF : 0xFFC8C8C8;
         g_font_small->DrawTextA(NULL, it->name, -1, &ir, DT_LEFT | DT_VCENTER, text_c);
 
-        if (it->type == 0 && it->val) {
+        if (it->type == 2) {
+            int btn_x = mx + MENU_W - 80;
+            draw_rect(d, (float)btn_x, (float)(iy + 3), 64, (float)(ITEM_H - 6), 0xFFC8A000);
+            RECT br = {btn_x, iy, btn_x+64, iy+ITEM_H};
+            g_font_small->DrawTextA(NULL, "> EXEC", -1, &br, DT_CENTER | DT_VCENTER, 0xFF000000);
+        } else if (it->type == 0 && it->val) {
             int val = *(int*)it->val;
             int toggle_x = mx + MENU_W - 70;
             int toggle_y = iy + 4;
