@@ -4,11 +4,16 @@
 #include "menu.h"
 #include "input.h"
 #include "config.h"
+#include "imgui.h"
+#include "backends/imgui_impl_win32.h"
+#include "backends/imgui_impl_dx9.h"
 #include <MinHook.h>
 
-static HWND g_game_hwnd = NULL;
+HWND g_game_hwnd = NULL;
+int g_imgui_ready = 0;
 static WNDPROC g_orig_wndproc = NULL;
 static HRESULT (WINAPI *orig_EndScene)(IDirect3DDevice9*) = NULL;
+static HRESULT (WINAPI *orig_Present)(IDirect3DDevice9*, CONST RECT*, CONST RECT*, HWND, CONST RGNDATA*) = NULL;
 static void **g_fake_vt = NULL;
 static HRESULT (WINAPI *orig_Reset)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*) = NULL;
 
@@ -52,14 +57,33 @@ void install_time_hooks(void) {
     LOG("Time hooks installed via MinHook");
 }
 
+// ImGui's WndProcHandler: for keyboard (WM_KEYDOWN/UP) it records keys internally
+// and returns 0, so it never blocks them. For mouse/capture messages it may return
+// non-zero to indicate "ImGui consumed this".
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
 static LRESULT CALLBACK hk_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    int vk = (int)wParam;
+    // 1. Track all keyboard state. Swallow F1 so the game never sees it.
     if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
-        if (vk >= 0 && vk < 256) g_key_states[vk] = 1;
+        int vk = (int)wParam;
+        if (vk >= 0 && vk < 256) {
+            g_key_states[vk] = 1;
+            if (vk == VK_F1) {
+                LOG("WndProc: F1 KEYDOWN received (lParam=%08X)", (unsigned)lParam);
+                return 0;                 // swallow F1 — menu_update_input will toggle
+            }
+        }
     } else if (msg == WM_KEYUP || msg == WM_SYSKEYUP) {
+        int vk = (int)wParam;
         if (vk >= 0 && vk < 256) g_key_states[vk] = 0;
     }
 
+    // 2. Let ImGui see the message (for its internal state / widgets).
+    //    It returns TRUE only for messages it wants to swallow (e.g. mouse capture).
+    if (g_imgui_ready && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+        return TRUE;
+
+    // 3. When the menu is open, block remaining keyboard messages from reaching the game.
     if (g_menu_open &&
         (msg == WM_KEYDOWN || msg == WM_KEYUP ||
          msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP ||
@@ -67,6 +91,7 @@ static LRESULT CALLBACK hk_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         return 0;
     }
 
+    // 4. Forward everything else to the original WndProc.
     if (g_orig_wndproc) {
         return CallWindowProc(g_orig_wndproc, hwnd, msg, wParam, lParam);
     }
@@ -83,39 +108,34 @@ static void hook_window(HWND hwnd) {
     }
 }
 
-static BOOL (WINAPI *real_PeekMessageA)(LPMSG, HWND, UINT, UINT, UINT) = NULL;
 
-static BOOL WINAPI hk_PeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin,
-                                    UINT wMsgFilterMax, UINT wRemoveMsg) {
-    BOOL ret = real_PeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
-    if (!ret || !g_menu_open) return ret;
-
-    if (lpMsg->message == WM_KEYDOWN || lpMsg->message == WM_KEYUP ||
-        lpMsg->message == WM_SYSKEYDOWN || lpMsg->message == WM_SYSKEYUP ||
-        lpMsg->message == WM_CHAR || lpMsg->message == WM_DEADCHAR) {
-        if (wRemoveMsg & PM_REMOVE) {
-            lpMsg->message = WM_NULL;
-            lpMsg->wParam = 0;
-            lpMsg->lParam = 0;
-        } else {
-            MSG dummy;
-            real_PeekMessageA(&dummy, hWnd, lpMsg->message, lpMsg->message, PM_REMOVE);
-        }
-        return FALSE;
-    }
-    return ret;
-}
-
-void hook_peekmessage(void) {
-    if (real_PeekMessageA) return;
-    if (MH_CreateHookApi(L"user32.dll", "PeekMessageA", (LPVOID)hk_PeekMessageA, (void**)&real_PeekMessageA) != MH_OK) {
-        LOG("PeekMessageA hook failed");
-    }
-}
 
 static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
     menu_increment_frame();
     if (!g_dev) { g_dev = d; LOG("Device acquired"); }
+
+    if (!g_game_hwnd && g_dev) {
+        D3DDEVICE_CREATION_PARAMETERS cp;
+        if (SUCCEEDED(g_dev->GetCreationParameters(&cp))) {
+            g_game_hwnd = cp.hFocusWindow;
+            if (g_game_hwnd) {
+                hook_window(g_game_hwnd);
+            }
+        }
+    }
+
+    if (menu_get_frame() == 20) {
+        install_input_hooks();
+    }
+
+    menu_update_input();
+    update_cheats();
+
+    return orig_EndScene(d);
+}
+
+static HRESULT WINAPI hk_Present(IDirect3DDevice9 *d, CONST RECT *pSource, CONST RECT *pDest, HWND hDestOverride, CONST RGNDATA *pDirty) {
+    if (!g_dev) g_dev = d;
 
     D3DVIEWPORT9 vp;
     if (SUCCEEDED(d->GetViewport(&vp))) {
@@ -123,46 +143,47 @@ static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
         g_sh = vp.Height;
     }
 
-    if (menu_should_be_ready() && g_dev) {
-        menu_init_fonts(d);
+    if (menu_should_be_ready() && !g_imgui_ready) {
+        if (g_game_hwnd) {
+            menu_init_imgui(d, g_game_hwnd);
+            g_imgui_ready = 1;
+        }
     }
     if (menu_should_be_ready() && !g_entity_count) {
         static int scanned = 0;
         if (!scanned) { scanned = 1; scan_entities(); }
     }
 
-    if (!g_game_hwnd && g_dev) {
-        D3DDEVICE_CREATION_PARAMETERS cp;
-        if (SUCCEEDED(g_dev->GetCreationParameters(&cp))) {
-            g_game_hwnd = cp.hFocusWindow;
-            if (!g_game_hwnd) g_game_hwnd = cp.hFocusWindow;
-            if (g_game_hwnd) {
-                hook_window(g_game_hwnd);
-            }
-        }
+    if (g_imgui_ready) {
+        ImGui_ImplDX9_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+
+        menu_render_overlay();
+        menu_render_debug();
+        menu_render();
+
+        ImGui::Render();
+        ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
     }
 
-    if (menu_get_frame() > 10 && menu_get_frame() % 120 == 0) {
-        install_input_hooks();
-    }
-
-    menu_update_input();
-    update_cheats();
-    menu_render_overlay(d);
-    menu_render_debug(d);
-    menu_render(d);
-
-    return orig_EndScene(d);
+    return orig_Present(d, pSource, pDest, hDestOverride, pDirty);
 }
 
 static HRESULT WINAPI hk_Reset(IDirect3DDevice9 *d, D3DPRESENT_PARAMETERS *pp) {
-    menu_release_fonts();
+    if (g_imgui_ready) {
+        ImGui_ImplDX9_InvalidateDeviceObjects();
+    }
 
     g_sw = pp->BackBufferWidth;
     g_sh = pp->BackBufferHeight;
     LOG("Reset: %dx%d windowed=%d", g_sw, g_sh, pp->Windowed);
 
-    return orig_Reset(d, pp);
+    HRESULT hr = orig_Reset(d, pp);
+    if (SUCCEEDED(hr) && g_imgui_ready) {
+        ImGui_ImplDX9_CreateDeviceObjects();
+    }
+    return hr;
 }
 
 void hook_device(IDirect3DDevice9 *dev) {
@@ -177,6 +198,9 @@ void hook_device(IDirect3DDevice9 *dev) {
     memcpy(g_fake_vt, vt, sz);
     orig_EndScene = (HRESULT (WINAPI *)(IDirect3DDevice9*))g_fake_vt[42];
     g_fake_vt[42] = (void*)hk_EndScene;
+
+    orig_Present = (HRESULT (WINAPI *)(IDirect3DDevice9*, CONST RECT*, CONST RECT*, HWND, CONST RGNDATA*))g_fake_vt[17];
+    g_fake_vt[17] = (void*)hk_Present;
 
     orig_Reset = (HRESULT (WINAPI *)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*))g_fake_vt[16];
     g_fake_vt[16] = (void*)hk_Reset;
@@ -197,7 +221,8 @@ static HRESULT WINAPI hk_CreateDevice(IDirect3D9 *d3d, UINT Adapter, D3DDEVTYPE 
                                        HWND hWnd, DWORD Flags, D3DPRESENT_PARAMETERS *pp,
                                        IDirect3DDevice9 **ppDev) {
     g_sw = pp->BackBufferWidth; g_sh = pp->BackBufferHeight;
-    LOG("CreateDevice: %dx%d windowed=%d", g_sw, g_sh, pp->Windowed);
+    g_game_hwnd = hWnd;
+    LOG("CreateDevice: %dx%d windowed=%d hwnd=%p", g_sw, g_sh, pp->Windowed, hWnd);
     HRESULT hr = real_CreateDevice(d3d, Adapter, Type, hWnd, Flags, pp, ppDev);
     if (SUCCEEDED(hr) && ppDev && *ppDev) {
         LOG("Device: %p", *ppDev);
@@ -236,8 +261,21 @@ extern "C" __declspec(dllexport) HRESULT WINAPI Direct3DCreate9Ex(UINT sdk, IDir
     typedef HRESULT (WINAPI *fn)(UINT, IDirect3D9Ex**);
     fn f = NULL;
     char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
-    HMODULE h = GetModuleHandleA(path); if (h) f = (fn)GetProcAddress(h, "Direct3DCreate9Ex");
-    return f ? f(sdk, ex) : E_NOTIMPL;
+    HMODULE h = LoadLibraryA(path); if (h) f = (fn)GetProcAddress(h, "Direct3DCreate9Ex");
+    if (!f) return E_NOTIMPL;
+    HRESULT hr = f(sdk, ex);
+    if (SUCCEEDED(hr) && ex && *ex) {
+        LOG("Direct3DCreate9Ex -> %p", *ex);
+        void **vt = *(void***)*ex;
+        real_CreateDevice = (HRESULT (WINAPI *)(IDirect3D9*, UINT, D3DDEVTYPE, HWND,
+                                                  DWORD, D3DPRESENT_PARAMETERS*, IDirect3DDevice9**))vt[16];
+        DWORD old;
+        VirtualProtect(&vt[16], sizeof(void*), PAGE_READWRITE, &old);
+        vt[16] = (void*)hk_CreateDevice;
+        VirtualProtect(&vt[16], sizeof(void*), old, &old);
+        LOG("Direct3DCreate9Ex: CreateDevice hooked");
+    }
+    return hr;
 }
 
 extern "C" __declspec(dllexport) int WINAPI D3DPERF_BeginEvent(DWORD c, const WCHAR *n) {
@@ -380,6 +418,11 @@ void le_send_message(int msg_id, void *data) {
 }
 
 void hooks_cleanup(void) {
+    if (g_imgui_ready) {
+        menu_release_imgui();
+        g_imgui_ready = 0;
+    }
+
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
 

@@ -5,7 +5,6 @@
 #include <d3d9.h>
 
 void hook_device(IDirect3DDevice9 *dev);
-void hook_peekmessage(void);
 
 extern DWORD (WINAPI *real_GetTickCount)(void);
 extern BOOL (WINAPI *real_QueryPerformanceCounter)(LARGE_INTEGER*);
@@ -19,5 +18,8 @@ void install_v12_hook(void);
 void* get_level_editor(void);
 void le_send_message(int msg_id, void *data);
 void hooks_cleanup(void);
+
+extern HWND g_game_hwnd;
+extern int g_imgui_ready;
 
 #endif

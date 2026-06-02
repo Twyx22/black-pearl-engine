@@ -4,18 +4,38 @@ HINSTANCE g_hinst = NULL;
 
 static FILE *g_log = NULL;
 
+void log_init(void) {
+    AllocConsole();
+    freopen("CONOUT$", "w", stdout);
+    freopen("CONOUT$", "w", stderr);
+    SetConsoleTitleA(MOD_NAME " " MOD_VER " - Debug Console");
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (h) {
+        CONSOLE_CURSOR_INFO ci = { 1, FALSE };
+        SetConsoleCursorInfo(h, &ci);
+    }
+    LOG("Console initialized");
+}
+
 void LOG(const char *fmt, ...) {
     if (!g_log) {
         g_log = fopen("bpe.log", "w");
         if (g_log) setvbuf(g_log, NULL, _IONBF, 0);
     }
-    if (!g_log) return;
+    char buf[4096];
+    int len = snprintf(buf, sizeof(buf), "[%lu] ", GetTickCount());
     va_list args;
     va_start(args, fmt);
-    fprintf(g_log, "[%lu] ", GetTickCount());
-    vfprintf(g_log, fmt, args);
-    fprintf(g_log, "\n");
+    len += vsnprintf(buf + len, sizeof(buf) - len, fmt, args);
     va_end(args);
+    buf[len] = '\n';
+    buf[len + 1] = '\0';
+
+    if (g_log) {
+        fputs(buf, g_log);
+        fflush(g_log);
+    }
+    WriteConsoleA(GetStdHandle(STD_OUTPUT_HANDLE), buf, strlen(buf), NULL, NULL);
 }
 
 void patch_mem(DWORD addr, const void *data, size_t len) {
