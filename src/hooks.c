@@ -285,6 +285,23 @@ void* get_level_editor(void) {
     return g_level_editor;
 }
 
+void le_send_message(int msg_id, void *data) {
+    void *le = g_level_editor;
+    if (!le) { LOG("le_send_message: no LevelEditor"); return; }
+    void **vt = *(void***)le;
+    if (!vt) { LOG("le_send_message: no vtable"); return; }
+
+    /* Message struct: { field_0=0, field_4=0, field_8=0, field_C=data } */
+    int msg[4] = { 0, 0, 0, (int)data };
+
+    /* vfunction12 at index 11 — __thiscall (this in ECX, params on stack).
+       Use __fastcall wrapper: first param (thisptr) in ECX, second (edx) garbage. */
+    typedef void (__fastcall *fn_t)(void* thisptr, void* edx, int* msg_param, int id);
+    fn_t fn = (fn_t)vt[11];
+    fn(le, NULL, msg, msg_id);
+    LOG("le_send_message(id=0x%X, data=%p)", msg_id, data);
+}
+
 void hooks_cleanup(void) {
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();

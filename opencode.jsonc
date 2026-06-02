@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "ghidra": {
+      "type": "local",
+      "command": ["/home/matthieu/ghidra-mcp/venv/bin/python", "/home/matthieu/ghidra-mcp/bridge_mcp_ghidra.py"],
+      "enabled": true,
+      "env": {
+        "GHIDRA_MCP_HOST": "127.0.0.1",
+        "GHIDRA_MCP_PORT": "8089"
+      }
+    }
+  }
+}
