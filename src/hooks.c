@@ -320,18 +320,22 @@ static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
 static HRESULT WINAPI hk_Present(IDirect3DDevice9 *d, CONST RECT *pSource, CONST RECT *pDest, HWND hDestOverride, CONST RGNDATA *pDirty) {
     if (!g_dev) g_dev = d;
 
+    /* Skip ImGui rendering and editor camera update if device is lost */
+    HRESULT coop = d->TestCooperativeLevel();
+    int device_ok = (coop == D3D_OK);
+
     D3DVIEWPORT9 vp;
-    if (SUCCEEDED(d->GetViewport(&vp))) {
+    if (device_ok && SUCCEEDED(d->GetViewport(&vp))) {
         g_sw = vp.Width;
         g_sh = vp.Height;
     }
-    if (SUCCEEDED(d->GetViewport(&g_viewport)) &&
+    if (device_ok && SUCCEEDED(d->GetViewport(&g_viewport)) &&
         SUCCEEDED(d->GetTransform(D3DTS_VIEW, &g_view_mat)) &&
         SUCCEEDED(d->GetTransform(D3DTS_PROJECTION, &g_proj_mat))) {
         g_camera_valid = 1;
     }
 
-    if (menu_should_be_ready() && !g_imgui_ready) {
+    if (device_ok && menu_should_be_ready() && !g_imgui_ready) {
         if (g_game_hwnd) {
             menu_init_imgui(d, g_game_hwnd);
             g_imgui_ready = 1;
