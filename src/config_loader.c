@@ -15,6 +15,7 @@ static ConfigMapping g_map[] = {
     {"invincible",          &g_cheats.invincible},
     {"super_speed",         &g_cheats.super_speed},
     {"super_jump",          &g_cheats.super_jump},
+    {"super_jump_scale",    &g_cheats.super_jump_scale},
     {"moon_jump",           &g_cheats.moon_jump},
     {"time_freeze",         &g_cheats.time_freeze},
     {"noclip",              &g_cheats.noclip},

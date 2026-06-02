@@ -3,7 +3,7 @@
 #include "hooks.h"
 #include "config.h"
 
-CheatsState g_cheats = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT};
+CheatsState g_cheats = {0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT};
 
 /* Stud patch: NOP sub ebx,eax and sbb esi,edx at fixed addresses (Cheat Engine found) */
 static unsigned char g_stud_sub_orig[2] = {0};
@@ -208,12 +208,13 @@ void remove_moon_jump(void) {
 
 /* Super Jump: patch fld [esi+0xFB0] → fld [our_force_float]
    to override the jump/velocity input. */
-static float g_super_jump_force = JUMP_FORCE_SUPER;
+static float g_super_jump_force = 100.0f;
 static unsigned char g_fld1_orig[6] = {0};
 static unsigned char g_fld2_orig[6] = {0};
 static int g_super_jump_patched = 0;
 
 void apply_super_jump(void) {
+    g_super_jump_force = (float)g_cheats.super_jump_scale;
     if (g_super_jump_patched) return;
     DWORD base = (DWORD)GetModuleHandleA(NULL);
     DWORD addr1 = base + JUMP_FLD_OFFSET1;
@@ -274,7 +275,7 @@ void update_cheats(void) {
     if (g_cheats.infinite_studs) apply_stud_patch(); else remove_stud_patch();
     if (g_cheats.invincible) apply_health_patch(); else remove_health_patch();
     if (g_cheats.super_speed) apply_super_speed(); else remove_super_speed();
-    if (g_cheats.super_jump) apply_super_jump(); else remove_super_jump();
+    if (g_cheats.super_jump) { apply_super_jump(); g_super_jump_force = (float)g_cheats.super_jump_scale; } else remove_super_jump();
     if (g_cheats.moon_jump) apply_moon_jump(); else remove_moon_jump();
 
     if (g_cheats.time_freeze && !prev_time_freeze) {
