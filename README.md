@@ -6,6 +6,8 @@
 ![Arch](https://img.shields.io/badge/Architecture-x86%20(32--bit)-orange)
 ![Status](https://img.shields.io/badge/Status-WIP-yellow)
 
+![Menu Screenshot](screenshots/menu.png)
+
 ## What Works
 
 | Cheat | Status | Notes |
