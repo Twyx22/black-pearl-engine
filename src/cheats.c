@@ -48,10 +48,46 @@ void remove_stud_patch(void) {
     LOG("Infinite Studs: unpatched");
 }
 
-static DWORD g_health_addrs[16];
-static unsigned char g_health_origs[16][4];
+/* ================================================================
+ * Invincibility: NOP the FSUB instruction that drains health.
+ *
+ * Health is a float at offset 0x864 in the player entity struct.
+ * The game uses FPU instructions to decrement health each frame:
+ *
+ *   FLD  dword ptr [reg+0x864]   ; load current health   (D9 8? 64 08 00 00)
+ *   FSUB dword ptr [delta_addr]  ; subtract frame delta  (D8 2? <addr>)
+ *   FSTP dword ptr [reg+0x864]   ; store new health      (D9 9? 64 08 00 00)
+ *
+ * We find each FSUB that follows a FLD health and NOP it entirely.
+ * This prevents passive health drain (damage over time) while keeping
+ * the load/store intact so the game doesn't crash.
+ *
+ * Note: PATTERN 5 (INC byte [reg+0x864]) is an effect counter, NOT
+ * health — do NOT patch it or the game crashes.
+ * ================================================================ */
+#define MAX_HEALTH_PATCHES 16
+static DWORD g_health_addrs[MAX_HEALTH_PATCHES];
+static unsigned char g_health_origs[MAX_HEALTH_PATCHES][8]; /* up to 8 bytes per FSUB */
+static int g_health_sizes[MAX_HEALTH_PATCHES];
 static int g_health_count = 0;
 static int g_health_patched = 0;
+
+/* Compute total length of a ModR/M instruction starting at code[0]=opcode, code[1]=ModR/M.
+ * Accounts for optional SIB byte and displacement based on mod and r/m fields. */
+static int modrm_instr_len(const unsigned char *code) {
+    int modrm = code[1];
+    int mod = (modrm >> 6) & 3;
+    int rm  = modrm & 7;
+    if (mod == 3) return 2;                      /* reg-reg: no memory operand */
+    if (mod == 0 && rm == 4) {                   /* SIB byte follows */
+        int base = code[2] & 7;
+        return (base == 5) ? 7 : 3;             /* SIB+disp32 or SIB-only */
+    }
+    if (mod == 0 && rm == 5) return 6;           /* [disp32] direct */
+    if (mod == 0) return 2;                      /* [reg] */
+    if (mod == 1) return 3;                      /* [reg+disp8] */
+    return 6;                                     /* [reg+disp32] */
+}
 
 static void scan_health_decrements(void) {
     if (g_health_count > 0) return;
@@ -59,50 +95,54 @@ static void scan_health_decrements(void) {
     if (!find_text_section(&text_start, &text_size)) return;
 
     unsigned char *code = (unsigned char*)text_start;
-    for (DWORD i = 0; i + 10 < text_size && g_health_count < 16; i++) {
-        if (code[i] == 0xFE && (code[i+1] & 0xC0) == 0x80) {
-            DWORD disp = *(DWORD*)(code + i + 2);
-            if (disp == HEALTH_OFFSET) {
-                g_health_addrs[g_health_count] = text_start + i;
-                memcpy(g_health_origs[g_health_count], code + i, 4);
-                g_health_count++;
-            }
-        }
-        if (code[i] == 0x80 && (code[i+1] & 0xC0) == 0x80 && code[i+6] == 0x01) {
-            DWORD disp = *(DWORD*)(code + i + 2);
-            if (disp == HEALTH_OFFSET) {
-                g_health_addrs[g_health_count] = text_start + i;
-                memcpy(g_health_origs[g_health_count], code + i, 4);
-                g_health_count++;
-            }
-        }
-        if (code[i] == 0x83 && (code[i+1] & 0xC0) == 0x80 && code[i+6] == 0x01) {
-            DWORD disp = *(DWORD*)(code + i + 2);
-            if (disp == HEALTH_OFFSET) {
-                g_health_addrs[g_health_count] = text_start + i;
-                memcpy(g_health_origs[g_health_count], code + i, 4);
-                g_health_count++;
-            }
+
+    /* Scan for FLD dword ptr [reg+0x864]:
+     *   D9 8? 64 08 00 00
+     * ModR/M 0x8? = mod=10(disp32), reg=0(FLD st(0)), r/m=any base register.
+     * This pattern is unique to health field access (offset 0x864). */
+    for (DWORD i = 0; i + 20 < text_size && g_health_count < MAX_HEALTH_PATCHES; i++) {
+        if (code[i] != 0xD9) continue;
+        if ((code[i+1] & 0xF8) != 0x80) continue;    /* mod=10, reg=0 (FLD) */
+        DWORD disp = *(DWORD*)(code + i + 2);
+        if (disp != HEALTH_OFFSET) continue;
+
+        /* FLD health found.  Scan forward up to 32 bytes for the FSUB.
+         * FSUB is D8 /4: D8 opcode + ModR/M with reg field = 4 and mod != 11.
+         * Known encoding: D8 25 <addr32> (FSUB dword ptr [disp32] for frame delta). */
+        for (DWORD j = i + 6; j < i + 32 && j + 6 < text_size; j++) {
+            if (code[j] != 0xD8) continue;
+            int mod = (code[j+1] >> 6) & 3;
+            int reg = (code[j+1] >> 3) & 7;
+            if (mod == 3 || reg != 4) continue;        /* not a memory FSUB */
+
+            int fsub_len = modrm_instr_len(code + j);
+            if (fsub_len < 2 || j + (DWORD)fsub_len > text_size) continue;
+
+            g_health_addrs[g_health_count] = text_start + j;
+            g_health_sizes[g_health_count] = fsub_len;
+            memcpy(g_health_origs[g_health_count], code + j, fsub_len);
+            g_health_count++;
+            break;  /* one FSUB per FLD health */
         }
     }
-    LOG("Health decrements found: %d", g_health_count);
+    LOG("Health decrements (FPU): found %d FSUB sites", g_health_count);
 }
 
 void apply_health_patch(void) {
     if (g_health_patched) return;
     scan_health_decrements();
-    unsigned char nop4[4] = {0x90, 0x90, 0x90, 0x90};
+    unsigned char nops[8] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
     for (int i = 0; i < g_health_count; i++) {
-        patch_mem(g_health_addrs[i], nop4, 4);
+        patch_mem(g_health_addrs[i], nops, g_health_sizes[i]);
     }
     g_health_patched = 1;
-    LOG("Invincibility: patched %d locations", g_health_count);
+    LOG("Invincibility: patched %d FSUB locations", g_health_count);
 }
 
 void remove_health_patch(void) {
     if (!g_health_patched) return;
     for (int i = 0; i < g_health_count; i++) {
-        patch_mem(g_health_addrs[i], g_health_origs[i], 4);
+        patch_mem(g_health_addrs[i], g_health_origs[i], g_health_sizes[i]);
     }
     g_health_patched = 0;
     LOG("Invincibility: unpatched");
