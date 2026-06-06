@@ -5,7 +5,7 @@
 
 typedef struct {
     int invincible, infinite_studs, super_speed, super_jump, super_jump_scale, speed_mult;
-    int moon_jump, time_freeze, noclip, show_debug, show_fps;
+    int time_freeze, noclip, show_debug, show_fps;
     int score_mult;
     int force_custom_studs;
     int custom_stud_value;
@@ -13,6 +13,8 @@ typedef struct {
     int golden_brick_value;
     int uw_enabled;
     int uw_ratio;
+    int char_scale;
+    int char_scale_val;
 } CheatsState;
 
 extern CheatsState g_cheats;
@@ -29,8 +31,8 @@ void remove_super_speed(void);
 void apply_super_jump(void);
 void remove_super_jump(void);
 
-void apply_moon_jump(void);
-void remove_moon_jump(void);
+void apply_char_scale(void);
+void remove_char_scale(void);
 
 void force_custom_studs(void);
 void force_golden_bricks(void);

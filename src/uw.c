@@ -105,11 +105,7 @@ HRESULT WINAPI hk_SetTransform(IDirect3DDevice9 *d, D3DTRANSFORMSTATETYPE state,
             D3DMATRIX mod = *matrix;
             float scale = orig_ratio / actual_ratio;
             mod._11 = matrix->_11 * scale;
-            LOG("UW: projection fix _11=%.4f * %.4f = %.4f (orig_ratio=%.4f actual=%.4f)",
-                matrix->_11, scale, mod._11, orig_ratio, actual_ratio);
             return orig_SetTransform(d, state, &mod);
-        } else {
-            LOG("UW: projection skip act=%.4f orig=%.4f", actual_ratio, orig_ratio);
         }
     }
 

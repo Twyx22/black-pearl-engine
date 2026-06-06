@@ -17,7 +17,6 @@ static ConfigMapping g_map[] = {
     {"super_jump",          &g_cheats.super_jump},
     {"super_jump_scale",    &g_cheats.super_jump_scale},
     {"speed_mult",          &g_cheats.speed_mult},
-    {"moon_jump",           &g_cheats.moon_jump},
     {"time_freeze",         &g_cheats.time_freeze},
     {"noclip",              &g_cheats.noclip},
     {"show_debug",          &g_cheats.show_debug},
@@ -29,6 +28,8 @@ static ConfigMapping g_map[] = {
     {"golden_brick_value",  &g_cheats.golden_brick_value},
     {"uw_enabled",          &g_cheats.uw_enabled},
     {"uw_ratio",            &g_cheats.uw_ratio},
+    {"char_scale",          &g_cheats.char_scale},
+    {"char_scale_val",      &g_cheats.char_scale_val},
 };
 
 #define MAP_COUNT (sizeof(g_map) / sizeof(g_map[0]))

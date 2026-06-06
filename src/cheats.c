@@ -3,7 +3,7 @@
 #include "hooks.h"
 #include "config.h"
 
-CheatsState g_cheats = {0, 0, 0, 0, 100, 1, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT};
+CheatsState g_cheats = {0, 0, 0, 0, 100, 1, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT, 0, 0, 0, 100};
 
 /* Stud patch: NOP sub ebx,eax and sbb esi,edx at fixed addresses (Cheat Engine found) */
 static unsigned char g_stud_sub_orig[2] = {0};
@@ -59,7 +59,7 @@ static void scan_health_decrements(void) {
     if (!find_text_section(&text_start, &text_size)) return;
 
     unsigned char *code = (unsigned char*)text_start;
-    for (DWORD i = 0; i < text_size - 10 && g_health_count < 16; i++) {
+    for (DWORD i = 0; i + 10 < text_size && g_health_count < 16; i++) {
         if (code[i] == 0xFE && (code[i+1] & 0xC0) == 0x80) {
             DWORD disp = *(DWORD*)(code + i + 2);
             if (disp == HEALTH_OFFSET) {
@@ -162,92 +162,134 @@ void remove_super_speed(void) {
     }
 }
 
-/* Moon Jump: patch fmul [esi+0xD78] → fmul [our_gravity_float]
-   to control the gravity multiplier for all entities. */
-static float g_moon_mult = GRAVITY_MULT_MOON;
-static unsigned char g_fmul1_orig[6] = {0};
-static unsigned char g_fmul2_orig[6] = {0};
-static int g_moon_patched = 0;
+/* ================================================================
+ * Character Scale: patch FLD [reg+0xFB0] to redirect to our scale var.
+ * Pattern: D9 8? B0 0F 00 00  (FLD dword ptr [reg+0xFB0])
+ * ================================================================ */
+#define MAX_SCALE_PATCHES 64
+static float g_scale_val = 1.0f;
+static struct {
+    DWORD addr;
+    unsigned char orig[6];
+} g_scale_patches[MAX_SCALE_PATCHES];
+static int g_scale_patch_count = 0;
+static int g_scale_patched = 0;
 
-void apply_moon_jump(void) {
-    if (g_moon_patched) return;
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    DWORD addr1 = base + JUMP_FMUL_OFFSET1;
-    DWORD addr2 = base + JUMP_FMUL_OFFSET2;
-
-    /* Save original bytes */
-    memcpy(g_fmul1_orig, (void*)addr1, 6);
-    memcpy(g_fmul2_orig, (void*)addr2, 6);
-
-    /* Build patch: D8 0D [addr] = fmul dword ptr [addr] (absolute) */
-    unsigned char patch[6];
-    patch[0] = 0xD8; patch[1] = 0x0D;
-    *(DWORD*)&patch[2] = (DWORD)&g_moon_mult;
-
-    DWORD old;
-    if (VirtualProtect((LPVOID)addr1, 6, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)addr1, patch, 6);
-        VirtualProtect((LPVOID)addr1, 6, old, &old);
+static void scan_scale_patches(void) {
+    if (g_scale_patch_count > 0) return;
+    DWORD text_start, text_size;
+    if (!find_text_section(&text_start, &text_size)) { return; }
+    unsigned char *code = (unsigned char*)text_start;
+    for (DWORD i = 0; i + 6 < text_size && g_scale_patch_count < MAX_SCALE_PATCHES; i++) {
+        if (code[i] == 0xD9 &&
+            ((code[i+1] >= 0x80 && code[i+1] <= 0x83) ||
+             (code[i+1] >= 0x88 && code[i+1] <= 0x8B)) &&
+            code[i+2] == 0xB0 && code[i+3] == 0x0F &&
+            code[i+4] == 0x00 && code[i+5] == 0x00) {
+            g_scale_patches[g_scale_patch_count].addr = text_start + i;
+            memcpy(g_scale_patches[g_scale_patch_count].orig, code + i, 6);
+            g_scale_patch_count++;
+        }
     }
-    if (VirtualProtect((LPVOID)addr2, 6, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)addr2, patch, 6);
-        VirtualProtect((LPVOID)addr2, 6, old, &old);
-    }
-    g_moon_patched = 1;
-    LOG("Moon Jump: fmul redirected to %.2f", g_moon_mult);
+    LOG("Char Scale: found %d FLD [reg+0xFB0] instances", g_scale_patch_count);
 }
 
-void remove_moon_jump(void) {
-    if (!g_moon_patched) return;
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    patch_mem(base + JUMP_FMUL_OFFSET1, g_fmul1_orig, 6);
-    patch_mem(base + JUMP_FMUL_OFFSET2, g_fmul2_orig, 6);
-    g_moon_patched = 0;
-    LOG("Moon Jump: unpatched");
-}
-
-/* Super Jump: patch fld [esi+0xFB0] → fld [our_force_float]
-   to override the jump/velocity input. */
-static float g_super_jump_force = 100.0f;
-static unsigned char g_fld1_orig[6] = {0};
-static unsigned char g_fld2_orig[6] = {0};
-static int g_super_jump_patched = 0;
-
-void apply_super_jump(void) {
-    g_super_jump_force = (float)g_cheats.super_jump_scale;
-    if (g_super_jump_patched) return;
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    DWORD addr1 = base + JUMP_FLD_OFFSET1;
-    DWORD addr2 = base + JUMP_FLD_OFFSET2;
-
-    memcpy(g_fld1_orig, (void*)addr1, 6);
-    memcpy(g_fld2_orig, (void*)addr2, 6);
-
-    /* Build patch: D9 05 [addr] = fld dword ptr [addr] (absolute) */
+static void apply_scale_val(float val) {
+    g_scale_val = val;
+    if (g_scale_patched) return;
+    scan_scale_patches();
+    if (g_scale_patch_count == 0) return;
     unsigned char patch[6];
     patch[0] = 0xD9; patch[1] = 0x05;
-    *(DWORD*)&patch[2] = (DWORD)&g_super_jump_force;
+    *(DWORD*)&patch[2] = (DWORD)&g_scale_val;
+    for (int i = 0; i < g_scale_patch_count; i++)
+        patch_mem(g_scale_patches[i].addr, patch, 6);
+    g_scale_patched = 1;
+}
 
-    DWORD old;
-    if (VirtualProtect((LPVOID)addr1, 6, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)addr1, patch, 6);
-        VirtualProtect((LPVOID)addr1, 6, old, &old);
+static void remove_scale_patches(void) {
+    if (!g_scale_patched) return;
+    for (int i = 0; i < g_scale_patch_count; i++)
+        patch_mem(g_scale_patches[i].addr, g_scale_patches[i].orig, 6);
+    g_scale_patched = 0;
+}
+
+void apply_char_scale(void) {
+    static int prev = 0;
+    if (!prev) { LOG("Char Scale: on"); prev = 1; }
+    apply_scale_val((float)g_cheats.char_scale_val / 100.0f);
+}
+
+void remove_char_scale(void) {
+    LOG("Char Scale: off");
+    remove_scale_patches();
+}
+
+/* ================================================================
+ * Y-Velocity: patch FMUL [reg+0xD78] to redirect to our own
+ * gravity factor. Pattern: D8 8? 78 0D 00 00.
+ * Slider -10..+10 controls vertical movement rate.
+ * ================================================================ */
+#define MAX_GRAVITY_PATCHES 256
+static float g_gravity_mult = 1.0f;
+static struct {
+    DWORD addr;
+    unsigned char orig[6];
+} g_gravity_patches[MAX_GRAVITY_PATCHES];
+static int g_gravity_patch_count = 0;
+static int g_gravity_patched = 0;
+
+static void scan_gravity_patches(void) {
+    if (g_gravity_patch_count > 0) return;
+    DWORD text_start, text_size;
+    if (!find_text_section(&text_start, &text_size)) {
+        LOG("Y-Velocity: failed to find .text section");
+        return;
     }
-    if (VirtualProtect((LPVOID)addr2, 6, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)addr2, patch, 6);
-        VirtualProtect((LPVOID)addr2, 6, old, &old);
+    unsigned char *code = (unsigned char*)text_start;
+    for (DWORD i = 0; i + 6 < text_size && g_gravity_patch_count < MAX_GRAVITY_PATCHES; i++) {
+        if (code[i] == 0xD8 &&
+            ((code[i+1] >= 0x88 && code[i+1] <= 0x8B) ||
+             (code[i+1] >= 0x8D && code[i+1] <= 0x8F)) &&
+            code[i+2] == 0x78 && code[i+3] == 0x0D && 
+            code[i+4] == 0x00 && code[i+5] == 0x00) {
+            g_gravity_patches[g_gravity_patch_count].addr = text_start + i;
+            memcpy(g_gravity_patches[g_gravity_patch_count].orig, code + i, 6);
+            g_gravity_patch_count++;
+        }
     }
-    g_super_jump_patched = 1;
-    LOG("Super Jump: fld redirected to %.1f", g_super_jump_force);
+    LOG("Y-Velocity: found %d FMUL [reg+0xD78] instances", g_gravity_patch_count);
+}
+
+static void apply_gravity_mult(float mult) {
+    g_gravity_mult = mult;
+    if (g_gravity_patched) return;
+    scan_gravity_patches();
+    if (g_gravity_patch_count == 0) return;
+    unsigned char patch[6];
+    patch[0] = 0xD8; patch[1] = 0x0D;
+    *(DWORD*)&patch[2] = (DWORD)&g_gravity_mult;
+    for (int i = 0; i < g_gravity_patch_count; i++)
+        patch_mem(g_gravity_patches[i].addr, patch, 6);
+    g_gravity_patched = 1;
+}
+
+static void remove_gravity_mult(void) {
+    if (!g_gravity_patched) return;
+    for (int i = 0; i < g_gravity_patch_count; i++)
+        patch_mem(g_gravity_patches[i].addr, g_gravity_patches[i].orig, 6);
+    g_gravity_patched = 0;
+}
+
+void apply_super_jump(void) {
+    static int prev = 0;
+    if (!prev) { LOG("Y-Velocity: %.1f", (float)g_cheats.super_jump_scale / 10.0f); prev = 1; }
+    apply_gravity_mult((float)g_cheats.super_jump_scale / 10.0f);
 }
 
 void remove_super_jump(void) {
-    if (!g_super_jump_patched) return;
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    patch_mem(base + JUMP_FLD_OFFSET1, g_fld1_orig, 6);
-    patch_mem(base + JUMP_FLD_OFFSET2, g_fld2_orig, 6);
-    g_super_jump_patched = 0;
-    LOG("Super Jump: unpatched");
+    LOG("Y-Velocity: off");
+    remove_gravity_mult();
 }
 
 const char *g_entities[64];
@@ -275,8 +317,12 @@ void update_cheats(void) {
     if (g_cheats.infinite_studs) apply_stud_patch(); else remove_stud_patch();
     if (g_cheats.invincible) apply_health_patch(); else remove_health_patch();
     if (g_cheats.super_speed) apply_super_speed(); else remove_super_speed();
-    if (g_cheats.super_jump) { apply_super_jump(); g_super_jump_force = (float)g_cheats.super_jump_scale; } else remove_super_jump();
-    if (g_cheats.moon_jump) apply_moon_jump(); else remove_moon_jump();
+    if (g_cheats.super_jump) apply_super_jump(); else remove_super_jump();
+    if (g_cheats.char_scale) apply_char_scale(); else remove_char_scale();
+    if (g_gravity_patched)
+        g_gravity_mult = (float)g_cheats.super_jump_scale / 10.0f;
+    if (g_scale_patched)
+        g_scale_val = (float)g_cheats.char_scale_val / 100.0f;
 
     if (g_cheats.time_freeze && !prev_time_freeze) {
         time_freeze_snapshot();
