@@ -26,7 +26,7 @@ static Item health_items[] = {
     {"Invincibility", 0, &g_cheats.invincible},
     {"Extra Hearts", 0, NULL},
     {"Regenerate", 0, NULL},
-    {"Breathe Underwater", 0, NULL},
+    {"Breathe Underwater", 0, &g_cheats.underwater_breath},
 };
 static Item stud_items[] = {
     {"Infinite Studs", 0, &g_cheats.infinite_studs},

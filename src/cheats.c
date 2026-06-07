@@ -4,7 +4,7 @@
 #include "config.h"
 #include "water.h"
 
-CheatsState g_cheats = {0, 0, 0, 0, 100, 1, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT, 0, 0, 0, 100, 0};
+CheatsState g_cheats = {0, 0, 0, 0, 100, 1, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT, 0, 0, 0, 100, 0, 0};
 
 /* Stud patch: NOP sub ebx,eax and sbb esi,edx at fixed addresses (Cheat Engine found) */
 static unsigned char g_stud_sub_orig[2] = {0};
@@ -50,104 +50,156 @@ void remove_stud_patch(void) {
 }
 
 /* ================================================================
- * Invincibility: NOP the FSUB instruction that drains health.
+ * Invincibility: Direct binary patches for enemy damage and death.
  *
- * Health is a float at offset 0x864 in the player entity struct.
- * The game uses FPU instructions to decrement health each frame:
+ * Two patches based on Cheat Engine scripts:
  *
- *   FLD  dword ptr [reg+0x864]   ; load current health   (D9 8? 64 08 00 00)
- *   FSUB dword ptr [delta_addr]  ; subtract frame delta  (D8 2? <addr>)
- *   FSTP dword ptr [reg+0x864]   ; store new health      (D9 9? 64 08 00 00)
+ * 1) DAMAGE PATCH (_LEGOPirates.exe+3D3B0B):
+ *    Original: FE 8D 26 0E 00 00  = DEC [EBP+0E26]
+ *    Effect: Decrements health when hit by enemy.
+ *    Patch: NOP (6 bytes) = player takes 0 damage from enemies.
  *
- * We find each FSUB that follows a FLD health and NOP it entirely.
- * This prevents passive health drain (damage over time) while keeping
- * the load/store intact so the game doesn't crash.
+ * 2) DEATH PATCH (_LEGOPirates.exe+4A3D35):
+ *    Original: 88 8E 26 0E 00 00  = MOV [ESI+0E26],CL
+ *    Effect: Resets health to 1 on death (CL=1).
+ *    Patch: NOP (6 bytes) = health stays at 4 hearts on death.
  *
- * Note: PATTERN 5 (INC byte [reg+0x864]) is an effect counter, NOT
- * health — do NOT patch it or the game crashes.
+ * Health offset is 0xE26 in the player entity struct.
  * ================================================================ */
-#define MAX_HEALTH_PATCHES 16
-static DWORD g_health_addrs[MAX_HEALTH_PATCHES];
-static unsigned char g_health_origs[MAX_HEALTH_PATCHES][8]; /* up to 8 bytes per FSUB */
-static int g_health_sizes[MAX_HEALTH_PATCHES];
-static int g_health_count = 0;
+
+static DWORD g_damage_patch_addr = 0;
+static DWORD g_death_patch_addr = 0;
+static unsigned char g_damage_orig[DAMAGE_PATCH_SIZE];
+static unsigned char g_death_orig[DEATH_PATCH_SIZE];
 static int g_health_patched = 0;
-
-/* Compute total length of a ModR/M instruction starting at code[0]=opcode, code[1]=ModR/M.
- * Accounts for optional SIB byte and displacement based on mod and r/m fields. */
-static int modrm_instr_len(const unsigned char *code) {
-    int modrm = code[1];
-    int mod = (modrm >> 6) & 3;
-    int rm  = modrm & 7;
-    if (mod == 3) return 2;                      /* reg-reg: no memory operand */
-    if (mod == 0 && rm == 4) {                   /* SIB byte follows */
-        int base = code[2] & 7;
-        return (base == 5) ? 7 : 3;             /* SIB+disp32 or SIB-only */
-    }
-    if (mod == 0 && rm == 5) return 6;           /* [disp32] direct */
-    if (mod == 0) return 2;                      /* [reg] */
-    if (mod == 1) return 3;                      /* [reg+disp8] */
-    return 6;                                     /* [reg+disp32] */
-}
-
-static void scan_health_decrements(void) {
-    if (g_health_count > 0) return;
-    DWORD text_start, text_size;
-    if (!find_text_section(&text_start, &text_size)) return;
-
-    unsigned char *code = (unsigned char*)text_start;
-
-    /* Scan for FLD dword ptr [reg+0x864]:
-     *   D9 8? 64 08 00 00
-     * ModR/M 0x8? = mod=10(disp32), reg=0(FLD st(0)), r/m=any base register.
-     * This pattern is unique to health field access (offset 0x864). */
-    for (DWORD i = 0; i + 20 < text_size && g_health_count < MAX_HEALTH_PATCHES; i++) {
-        if (code[i] != 0xD9) continue;
-        if ((code[i+1] & 0xF8) != 0x80) continue;    /* mod=10, reg=0 (FLD) */
-        DWORD disp = *(DWORD*)(code + i + 2);
-        if (disp != HEALTH_OFFSET) continue;
-
-        /* FLD health found.  Scan forward up to 32 bytes for the FSUB.
-         * FSUB is D8 /4: D8 opcode + ModR/M with reg field = 4 and mod != 11.
-         * Known encoding: D8 25 <addr32> (FSUB dword ptr [disp32] for frame delta). */
-        for (DWORD j = i + 6; j < i + 32 && j + 6 < text_size; j++) {
-            if (code[j] != 0xD8) continue;
-            int mod = (code[j+1] >> 6) & 3;
-            int reg = (code[j+1] >> 3) & 7;
-            if (mod == 3 || reg != 4) continue;        /* not a memory FSUB */
-
-            int fsub_len = modrm_instr_len(code + j);
-            if (fsub_len < 2 || j + (DWORD)fsub_len > text_size) continue;
-
-            g_health_addrs[g_health_count] = text_start + j;
-            g_health_sizes[g_health_count] = fsub_len;
-            memcpy(g_health_origs[g_health_count], code + j, fsub_len);
-            g_health_count++;
-            break;  /* one FSUB per FLD health */
-        }
-    }
-    LOG("Health decrements (FPU): found %d FSUB sites", g_health_count);
-}
 
 void apply_health_patch(void) {
     if (g_health_patched) return;
-    scan_health_decrements();
-    unsigned char nops[8] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
-    for (int i = 0; i < g_health_count; i++) {
-        patch_mem(g_health_addrs[i], nops, g_health_sizes[i]);
+
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    g_damage_patch_addr = base + DAMAGE_PATCH_OFFSET;
+    g_death_patch_addr  = base + DEATH_PATCH_OFFSET;
+
+    DWORD old;
+    unsigned char nops[6] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
+
+    /* Save original bytes from both addresses */
+    if (!VirtualProtect((LPVOID)g_damage_patch_addr, DAMAGE_PATCH_SIZE, PAGE_EXECUTE_READ, &old)) {
+        LOG("Invincibility: cannot read damage patch target 0x%08X", g_damage_patch_addr);
+        return;
     }
+    memcpy(g_damage_orig, (void*)g_damage_patch_addr, DAMAGE_PATCH_SIZE);
+    VirtualProtect((LPVOID)g_damage_patch_addr, DAMAGE_PATCH_SIZE, old, &old);
+
+    if (!VirtualProtect((LPVOID)g_death_patch_addr, DEATH_PATCH_SIZE, PAGE_EXECUTE_READ, &old)) {
+        LOG("Invincibility: cannot read death patch target 0x%08X", g_death_patch_addr);
+        return;
+    }
+    memcpy(g_death_orig, (void*)g_death_patch_addr, DEATH_PATCH_SIZE);
+    VirtualProtect((LPVOID)g_death_patch_addr, DEATH_PATCH_SIZE, old, &old);
+
+    /* NOP the damage instruction: DEC [EBP+0E26] -> NOP x6 */
+    if (!VirtualProtect((LPVOID)g_damage_patch_addr, DAMAGE_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
+        LOG("Invincibility: VirtualProtect FAILED for damage patch at 0x%08X", g_damage_patch_addr);
+        return;
+    }
+    memcpy((void*)g_damage_patch_addr, nops, DAMAGE_PATCH_SIZE);
+    VirtualProtect((LPVOID)g_damage_patch_addr, DAMAGE_PATCH_SIZE, old, &old);
+    LOG("Invincibility: NOP'd DEC [EBP+0E26] at 0x%08X (enemy damage disabled)", g_damage_patch_addr);
+
+    /* NOP the death instruction: MOV [ESI+0E26],CL -> NOP x6 */
+    if (!VirtualProtect((LPVOID)g_death_patch_addr, DEATH_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
+        LOG("Invincibility: VirtualProtect FAILED for death patch at 0x%08X", g_death_patch_addr);
+        return;
+    }
+    memcpy((void*)g_death_patch_addr, nops, DEATH_PATCH_SIZE);
+    VirtualProtect((LPVOID)g_death_patch_addr, DEATH_PATCH_SIZE, old, &old);
+    LOG("Invincibility: NOP'd MOV [ESI+0E26],CL at 0x%08X (death health reset disabled)", g_death_patch_addr);
+
     g_health_patched = 1;
-    LOG("Invincibility: patched %d FSUB locations", g_health_count);
+    LOG("Invincibility: patched (enemy damage + death reset disabled)");
 }
 
 void remove_health_patch(void) {
     if (!g_health_patched) return;
-    for (int i = 0; i < g_health_count; i++) {
-        patch_mem(g_health_addrs[i], g_health_origs[i], g_health_sizes[i]);
+
+    DWORD old;
+
+    /* Restore damage instruction */
+    if (VirtualProtect((LPVOID)g_damage_patch_addr, DAMAGE_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
+        memcpy((void*)g_damage_patch_addr, g_damage_orig, DAMAGE_PATCH_SIZE);
+        VirtualProtect((LPVOID)g_damage_patch_addr, DAMAGE_PATCH_SIZE, old, &old);
     }
+
+    /* Restore death instruction */
+    if (VirtualProtect((LPVOID)g_death_patch_addr, DEATH_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
+        memcpy((void*)g_death_patch_addr, g_death_orig, DEATH_PATCH_SIZE);
+        VirtualProtect((LPVOID)g_death_patch_addr, DEATH_PATCH_SIZE, old, &old);
+    }
+
     g_health_patched = 0;
     LOG("Invincibility: unpatched");
 }
+
+
+/* ================================================================
+ * Breathe Underwater: NOP oxygen timer decrement.
+ *
+ * Cheat Engine script (_LEGOPirates.exe+37B910):
+ *   Original: FE 8E 36 03 00 00  = DEC [ESI+00000336]
+ *   Effect: Decrements oxygen timer when underwater.
+ *   Patch: NOP (6 bytes) = oxygen timer never decrements = infinite breath.
+ * ================================================================ */
+
+static DWORD g_breath_patch_addr = 0;
+static unsigned char g_breath_orig[BREATH_PATCH_SIZE];
+static int g_breath_patched = 0;
+
+void apply_breath_patch(void) {
+    if (g_breath_patched) return;
+
+    DWORD base = (DWORD)GetModuleHandleA(NULL);
+    g_breath_patch_addr = base + BREATH_PATCH_OFFSET;
+
+    DWORD old;
+    unsigned char nops[6] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
+
+    /* Save original bytes */
+    if (!VirtualProtect((LPVOID)g_breath_patch_addr, BREATH_PATCH_SIZE, PAGE_EXECUTE_READ, &old)) {
+        LOG("Breathe Underwater: cannot read patch target 0x%08X", g_breath_patch_addr);
+        return;
+    }
+    memcpy(g_breath_orig, (void*)g_breath_patch_addr, BREATH_PATCH_SIZE);
+    VirtualProtect((LPVOID)g_breath_patch_addr, BREATH_PATCH_SIZE, old, &old);
+
+    /* NOP the oxygen decrement: DEC [ESI+336] -> NOP x6 */
+    if (!VirtualProtect((LPVOID)g_breath_patch_addr, BREATH_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
+        LOG("Breathe Underwater: VirtualProtect FAILED at 0x%08X", g_breath_patch_addr);
+        return;
+    }
+    memcpy((void*)g_breath_patch_addr, nops, BREATH_PATCH_SIZE);
+    VirtualProtect((LPVOID)g_breath_patch_addr, BREATH_PATCH_SIZE, old, &old);
+    LOG("Breathe Underwater: NOP'd DEC [ESI+336] at 0x%08X (oxygen timer frozen)", g_breath_patch_addr);
+
+    g_breath_patched = 1;
+    LOG("Breathe Underwater: patched");
+}
+
+void remove_breath_patch(void) {
+    if (!g_breath_patched) return;
+
+    DWORD old;
+
+    /* Restore original instruction */
+    if (VirtualProtect((LPVOID)g_breath_patch_addr, BREATH_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
+        memcpy((void*)g_breath_patch_addr, g_breath_orig, BREATH_PATCH_SIZE);
+        VirtualProtect((LPVOID)g_breath_patch_addr, BREATH_PATCH_SIZE, old, &old);
+    }
+
+    g_breath_patched = 0;
+    LOG("Breathe Underwater: unpatched");
+}
+
 
 void force_custom_studs(void) {
     if (!g_cheats.force_custom_studs) return;
@@ -357,6 +409,7 @@ void update_cheats(void) {
     static int prev_time_freeze = 0;
     if (g_cheats.infinite_studs) apply_stud_patch(); else remove_stud_patch();
     if (g_cheats.invincible) apply_health_patch(); else remove_health_patch();
+    if (g_cheats.underwater_breath) apply_breath_patch(); else remove_breath_patch();
     if (g_cheats.super_speed) apply_super_speed(); else remove_super_speed();
     if (g_cheats.super_jump) apply_super_jump(); else remove_super_jump();
     if (g_cheats.char_scale) apply_char_scale(); else remove_char_scale();

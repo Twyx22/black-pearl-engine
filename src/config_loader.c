@@ -31,6 +31,7 @@ static ConfigMapping g_map[] = {
     {"char_scale",          &g_cheats.char_scale},
     {"char_scale_val",      &g_cheats.char_scale_val},
     {"remove_water",        &g_cheats.remove_water},
+    {"underwater_breath",    &g_cheats.underwater_breath},
 };
 
 #define MAP_COUNT (sizeof(g_map) / sizeof(g_map[0]))

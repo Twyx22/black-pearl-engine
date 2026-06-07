@@ -32,6 +32,7 @@
 | **Super Speed** | ✅ | Overwrites walk/run speed float constants in memory |
 | **Speed Mult** | ✅ | Scales game time delta via `GetTickCount`/`QueryPerformanceCounter`/`timeGetTime` hooks. Range: **1x to 100x** |
 | **Ultra-Wide Support** | ✅ | Hooks `SetTransform` to fix projection matrix for 21:9, 32:9, and custom aspect ratios |
+| **Breathe Underwater** | ✅ | NOPs oxygen timer decrement (`DEC [ESI+0x336]`) — infinite breath underwater |
 | **Menu UI** | ✅ | ImGui-based overlay with 5 tabs, keyboard navigation, text input for values |
 | **FPS Counter** | ✅ | Real-time FPS display (toggle with in-menu option) |
 | **Debug Info** | ✅ | Entity string table viewer (toggle with **F2**) |
@@ -46,7 +47,7 @@
 | **Input Blocking** | ⚠️ | WndProc + PeekMessageA hooks; unreliable under Wine/Proton |
 | **NoClip** | ❌ | Placeholder — not yet implemented |
 | **Stud Magnet** | ❌ | Placeholder — not yet implemented |
-| **Extra Hearts / Regenerate / Breathe Underwater** | ❌ | Placeholders in Health tab |
+| **Extra Hearts / Regenerate** | ❌ | Placeholders in Health tab |
 
 Most hardcoded addresses were found via Cheat Engine and are specific to the GOG/retail build. They will likely differ for Steam or other versions. Cheats that use dynamic `.text` section scanning (Y Velocity, Character Scale, Invincibility) are more resilient to game patches.
 
@@ -140,6 +141,7 @@ uw_enabled=0
 uw_ratio=0
 char_scale=0
 char_scale_val=100
+underwater_breath=0
 ```
 
 ### Config Keys
@@ -165,6 +167,7 @@ char_scale_val=100
 | `uw_ratio` | int | 0 | Aspect ratio mode (0=Auto, 1=16:9, 2=21:9, 3=32:9) |
 | `char_scale` | toggle | 0 | Enable character scale modifier |
 | `char_scale_val` | int | 100 | Character scale percentage (10–1000) |
+| `underwater_breath` | toggle | 0 | NOP oxygen timer decrement for infinite underwater breath |
 
 ## Known Addresses
 
@@ -181,6 +184,7 @@ These are still fixed and may break across game versions:
 | Golden bricks | `base + 0x00B776E4` (4 bytes) | Forced each frame |
 | Entity table | `base + 0x00C8F400` | Pointer array to entity strings |
 | Walk speed | `0x00E24C50` (float) | Overwritten for Super Speed |
+| Oxygen timer | `base + 0x0037B910` (`DEC [ESI+336]`) | NOP'd for Breathe Underwater |
 | Run speed | `0x00E24C54` (float) | Overwritten for Super Speed |
 | Aspect ratio | `base + 0x006740B0` (float) | Saved/restored for Ultra-Wide |
 

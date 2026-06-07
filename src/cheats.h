@@ -16,6 +16,7 @@ typedef struct {
     int char_scale;
     int char_scale_val;
     int remove_water;
+    int underwater_breath;
 } CheatsState;
 
 extern CheatsState g_cheats;
@@ -34,6 +35,9 @@ void remove_super_jump(void);
 
 void apply_char_scale(void);
 void remove_char_scale(void);
+
+void apply_breath_patch(void);
+void remove_breath_patch(void);
 
 void force_custom_studs(void);
 void force_golden_bricks(void);

@@ -26,8 +26,17 @@
 
 /* --- Health --- */
 
-/* Offset from entity base pointer to health value (DEC [reg+0x864]) */
-#define HEALTH_OFFSET           0x864
+/* Offset from entity base pointer to health value (DEC [reg+0xE26]) */
+#define HEALTH_OFFSET           0xE26
+
+/* Invincibility binary patches (offsets from module base, CE scripts verified) */
+/* _LEGOPirates.exe+3D3B0B: DEC [ebp+00000E26] - enemy damage instruction */
+#define DAMAGE_PATCH_OFFSET     0x3D3B0B
+#define DAMAGE_PATCH_SIZE       6
+
+/* _LEGOPirates.exe+4A3D35: MOV [esi+00000E26],cl - health reset on death */
+#define DEATH_PATCH_OFFSET      0x4A3D35
+#define DEATH_PATCH_SIZE        6
 
 /* --- Movement Speed --- */
 
@@ -68,6 +77,12 @@
 
 /* Default golden bricks value when forced */
 #define GOLDEN_BRICK_DEFAULT    85
+
+/* --- Underwater Breath --- */
+
+/* _LEGOPirates.exe+37B910: DEC [esi+00000336] - oxygen timer decrement */
+#define BREATH_PATCH_OFFSET    0x37B910
+#define BREATH_PATCH_SIZE      6
 
 /* --- Custom Studs --- */
 
