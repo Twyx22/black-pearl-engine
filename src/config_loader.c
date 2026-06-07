@@ -30,6 +30,7 @@ static ConfigMapping g_map[] = {
     {"uw_ratio",            &g_cheats.uw_ratio},
     {"char_scale",          &g_cheats.char_scale},
     {"char_scale_val",      &g_cheats.char_scale_val},
+    {"remove_water",        &g_cheats.remove_water},
 };
 
 #define MAP_COUNT (sizeof(g_map) / sizeof(g_map[0]))

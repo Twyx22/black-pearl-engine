@@ -15,6 +15,7 @@ typedef struct {
     int uw_ratio;
     int char_scale;
     int char_scale_val;
+    int remove_water;
 } CheatsState;
 
 extern CheatsState g_cheats;

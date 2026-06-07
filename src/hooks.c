@@ -5,6 +5,7 @@
 #include "uw.h"
 #include "input.h"
 #include "config.h"
+#include "water.h"
 #include "imgui.h"
 #include "backends/imgui_impl_win32.h"
 #include "backends/imgui_impl_dx9.h"
@@ -273,6 +274,7 @@ void hook_device(IDirect3DDevice9 *dev) {
     VirtualProtect(dev, sizeof(void*), old, &old);
 
     uw_init();
+    water_init(dev);
     LOG("Hooked! vtable copied: %d entries (SetTransform hooked)", 512);
 }
 

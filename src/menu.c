@@ -50,6 +50,7 @@ static Item fun_items[] = {
 static Item visual_items[] = {
     {"FPS Counter", 0, &g_cheats.show_fps},
     {"Debug Info (F2)", 0, &g_cheats.show_debug},
+    {"Remove Water", 0, &g_cheats.remove_water},
 };
 
 static Item uw_items[] = {
@@ -83,7 +84,7 @@ Tab tabs[] = {
     {"Health", health_items, 4, NULL},
     {"Studs", stud_items, 7, NULL},
     {"Fun", fun_items, 8, NULL},
-    {"Visual", visual_items, 2, NULL},
+    {"Visual", visual_items, 3, NULL},
     {"UltraWide", uw_items, 5, uw_items_cb},
 };
 
