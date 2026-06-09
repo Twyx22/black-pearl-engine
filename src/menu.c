@@ -9,6 +9,7 @@
 #include "backends/imgui_impl_win32.h"
 #include "backends/imgui_impl_dx9.h"
 #include <stdio.h>
+#include <ctype.h>
 
 int g_menu_open = 0;
 int g_sw = 1280, g_sh = 720;
@@ -99,11 +100,45 @@ void menu_init_imgui(IDirect3DDevice9 *d, HWND hwnd) {
     ImGui_ImplDX9_Init(d);
 
     ImGuiStyle &style = ImGui::GetStyle();
-    style.WindowRounding = 0.0f;
-    style.FrameRounding = 0.0f;
-    style.Colors[ImGuiCol_Text] = ImVec4(0.90f, 0.90f, 0.90f, 1.00f);
-    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.09f, 0.09f, 0.12f, 0.94f);
-    style.Colors[ImGuiCol_Border] = ImVec4(1.00f, 0.78f, 0.00f, 1.00f);
+    
+    /* Premium Spacing & Padding */
+    style.WindowPadding = ImVec2(15.0f, 15.0f);
+    style.FramePadding = ImVec2(8.0f, 6.0f);
+    style.ItemSpacing = ImVec2(10.0f, 8.0f);
+    
+    /* Modern Rounded Edges */
+    style.WindowRounding = 8.0f;
+    style.FrameRounding = 4.0f;
+    style.ScrollbarRounding = 4.0f;
+    style.GrabRounding = 4.0f;
+    
+    /* curated Dark Gold & Sea-Teal Color Palette */
+    style.Colors[ImGuiCol_Text] = ImVec4(0.92f, 0.88f, 0.82f, 1.00f);
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.08f, 0.09f, 0.13f, 0.96f);
+    style.Colors[ImGuiCol_ChildBg] = ImVec4(0.06f, 0.07f, 0.09f, 0.50f);
+    style.Colors[ImGuiCol_PopupBg] = ImVec4(0.08f, 0.09f, 0.13f, 0.98f);
+    style.Colors[ImGuiCol_Border] = ImVec4(0.80f, 0.64f, 0.28f, 0.80f);
+    style.Colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    style.Colors[ImGuiCol_FrameBg] = ImVec4(0.12f, 0.14f, 0.18f, 0.54f);
+    style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.12f, 0.58f, 0.53f, 0.40f);
+    style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.12f, 0.58f, 0.53f, 0.67f);
+    style.Colors[ImGuiCol_TitleBg] = ImVec4(0.80f, 0.64f, 0.28f, 0.25f);
+    style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.80f, 0.64f, 0.28f, 0.40f);
+    style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.00f, 0.00f, 0.00f, 0.51f);
+    style.Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.02f, 0.02f, 0.02f, 0.53f);
+    style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.80f, 0.64f, 0.28f, 0.40f);
+    style.Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.80f, 0.64f, 0.28f, 0.60f);
+    style.Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.80f, 0.64f, 0.28f, 0.80f);
+    style.Colors[ImGuiCol_CheckMark] = ImVec4(0.18f, 0.75f, 0.68f, 1.00f);
+    style.Colors[ImGuiCol_SliderGrab] = ImVec4(0.12f, 0.58f, 0.53f, 1.00f);
+    style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(0.18f, 0.75f, 0.68f, 1.00f);
+    style.Colors[ImGuiCol_Button] = ImVec4(0.80f, 0.64f, 0.28f, 0.25f);
+    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.12f, 0.58f, 0.53f, 0.80f);
+    style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.18f, 0.75f, 0.68f, 1.00f);
+    style.Colors[ImGuiCol_Header] = ImVec4(0.12f, 0.58f, 0.53f, 0.31f);
+    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.12f, 0.58f, 0.53f, 0.80f);
+    style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.18f, 0.75f, 0.68f, 1.00f);
+    style.Colors[ImGuiCol_Separator] = ImVec4(0.80f, 0.64f, 0.28f, 0.50f);
 
     LOG("ImGui initialized");
 }
@@ -250,17 +285,22 @@ void menu_render(void) {
     int sw = g_sw, sh = g_sh;
     int mx = (sw - MENU_W) / 2, my = (sh - MENU_H) / 2;
 
+    /* Shadow effect */
     for (int i = 1; i <= 4; i++)
         dl->AddRectFilled(ImVec2((float)(mx+i), (float)(my+i)), ImVec2((float)(mx+i+MENU_W), (float)(my+i+MENU_H)), IM_COL32(0,0,0,64));
 
-    dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+MENU_H)), IM_COL32(24,24,24,240));
-    dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+1)), IM_COL32(255,200,0,255));
-    dl->AddRectFilled(ImVec2((float)mx, (float)(my+MENU_H-1)), ImVec2((float)(mx+MENU_W), (float)(my+MENU_H)), IM_COL32(255,200,0,255));
-    dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+1), (float)(my+MENU_H)), IM_COL32(255,200,0,255));
-    dl->AddRectFilled(ImVec2((float)(mx+MENU_W-1), (float)my), ImVec2((float)(mx+MENU_W), (float)(my+MENU_H)), IM_COL32(255,200,0,255));
+    /* Main box (deep slate navy) */
+    dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+MENU_H)), IM_COL32(20, 23, 33, 245));
+    
+    /* Gold borders */
+    dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+1)), IM_COL32(204, 163, 71, 255));
+    dl->AddRectFilled(ImVec2((float)mx, (float)(my+MENU_H-1)), ImVec2((float)(mx+MENU_W), (float)(my+MENU_H)), IM_COL32(204, 163, 71, 255));
+    dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+1), (float)(my+MENU_H)), IM_COL32(204, 163, 71, 255));
+    dl->AddRectFilled(ImVec2((float)(mx+MENU_W-1), (float)my), ImVec2((float)(mx+MENU_W), (float)(my+MENU_H)), IM_COL32(204, 163, 71, 255));
 
-    dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+36)), IM_COL32(255,200,0,255));
-    dl->AddRectFilled(ImVec2((float)mx, (float)(my+34)), ImVec2((float)(mx+MENU_W), (float)(my+36)), IM_COL32(212,160,0,255));
+    /* Header banner (gold) */
+    dl->AddRectFilled(ImVec2((float)mx, (float)my), ImVec2((float)(mx+MENU_W), (float)(my+36)), IM_COL32(204, 163, 71, 255));
+    dl->AddRectFilled(ImVec2((float)mx, (float)(my+34)), ImVec2((float)(mx+MENU_W), (float)(my+36)), IM_COL32(170, 130, 45, 255));
 
     const char *title = MOD_NAME " " MOD_VER;
     ImVec2 ts = ImGui::CalcTextSize(title);
@@ -271,15 +311,15 @@ void menu_render(void) {
     for (int i = 0; i < TAB_COUNT; i++) {
         int tx = mx + (int)(i * tw);
         if (i == g_tab) {
-            dl->AddRectFilled(ImVec2((float)(tx+4), (float)(tab_y+2)), ImVec2((float)(tx+(int)tw-4), (float)(tab_y+24)), IM_COL32(96,255,200,0));
-            dl->AddRectFilled(ImVec2((float)(tx+4), (float)(tab_y+22)), ImVec2((float)(tx+(int)tw-4), (float)(tab_y+24)), IM_COL32(255,200,0,255));
+            dl->AddRectFilled(ImVec2((float)(tx+4), (float)(tab_y+2)), ImVec2((float)(tx+(int)tw-4), (float)(tab_y+24)), IM_COL32(30, 148, 135, 120));
+            dl->AddRectFilled(ImVec2((float)(tx+4), (float)(tab_y+22)), ImVec2((float)(tx+(int)tw-4), (float)(tab_y+24)), IM_COL32(204, 163, 71, 255));
             const char *tn = tabs[i].name;
             ImVec2 tns = ImGui::CalcTextSize(tn);
-            dl->AddText(ImVec2((float)(tx + ((int)tw - (int)tns.x) / 2), (float)(tab_y + (24 - (int)tns.y) / 2)), IM_COL32(255,200,0,255), tn);
+            dl->AddText(ImVec2((float)(tx + ((int)tw - (int)tns.x) / 2), (float)(tab_y + (24 - (int)tns.y) / 2)), IM_COL32(204, 163, 71, 255), tn);
         } else {
             const char *tn = tabs[i].name;
             ImVec2 tns = ImGui::CalcTextSize(tn);
-            dl->AddText(ImVec2((float)(tx + ((int)tw - (int)tns.x) / 2), (float)(tab_y + (24 - (int)tns.y) / 2)), IM_COL32(144,144,144,255), tn);
+            dl->AddText(ImVec2((float)(tx + ((int)tw - (int)tns.x) / 2), (float)(tab_y + (24 - (int)tns.y) / 2)), IM_COL32(160, 160, 160, 255), tn);
         }
     }
 
@@ -297,11 +337,11 @@ void menu_render(void) {
         }
 
         if (i % 2 == 0)
-            dl->AddRectFilled(ImVec2((float)(mx+8), (float)iy), ImVec2((float)(mx+MENU_W-8), (float)(iy+ITEM_H)), IM_COL32(255,255,255,32));
+            dl->AddRectFilled(ImVec2((float)(mx+8), (float)iy), ImVec2((float)(mx+MENU_W-8), (float)(iy+ITEM_H)), IM_COL32(255,255,255,16));
 
         if (i == g_sel) {
-            dl->AddRectFilled(ImVec2((float)(mx+4), (float)iy), ImVec2((float)(mx+7), (float)(iy+ITEM_H)), IM_COL32(255,200,0,255));
-            dl->AddRectFilled(ImVec2((float)(mx+8), (float)iy), ImVec2((float)(mx+MENU_W-8), (float)(iy+ITEM_H)), IM_COL32(255,200,0,48));
+            dl->AddRectFilled(ImVec2((float)(mx+4), (float)iy), ImVec2((float)(mx+7), (float)(iy+ITEM_H)), IM_COL32(204, 163, 71, 255));
+            dl->AddRectFilled(ImVec2((float)(mx+8), (float)iy), ImVec2((float)(mx+MENU_W-8), (float)(iy+ITEM_H)), IM_COL32(30, 148, 135, 48));
         }
 
         ImU32 text_c = (i == g_sel) ? IM_COL32(255,255,255,255) : IM_COL32(200,200,200,255);
@@ -309,10 +349,10 @@ void menu_render(void) {
 
         if (it->type == 2) {
             int btn_x = mx + MENU_W - 80;
-            dl->AddRectFilled(ImVec2((float)btn_x, (float)(iy+3)), ImVec2((float)(btn_x+64), (float)(iy+ITEM_H-3)), IM_COL32(200,160,0,255));
+            dl->AddRectFilled(ImVec2((float)btn_x, (float)(iy+3)), ImVec2((float)(btn_x+64), (float)(iy+ITEM_H-3)), IM_COL32(30, 148, 135, 255));
             const char *btn = "> EXEC";
             ImVec2 bs = ImGui::CalcTextSize(btn);
-            dl->AddText(ImVec2((float)(btn_x + (64 - (int)bs.x) / 2), (float)(iy + (ITEM_H - (int)bs.y) / 2)), IM_COL32(0,0,0,255), btn);
+            dl->AddText(ImVec2((float)(btn_x + (64 - (int)bs.x) / 2), (float)(iy + (ITEM_H - (int)bs.y) / 2)), IM_COL32(255,255,255,255), btn);
         } else if (it->type == 0 && it->val) {
             int val = *(int*)it->val;
             int toggle_x = mx + MENU_W - 70;
@@ -320,7 +360,7 @@ void menu_render(void) {
             int toggle_w = 50;
             int toggle_h = ITEM_H - 8;
             if (val) {
-                dl->AddRectFilled(ImVec2((float)toggle_x, (float)toggle_y), ImVec2((float)(toggle_x+toggle_w), (float)(toggle_y+toggle_h)), IM_COL32(0,170,0,255));
+                dl->AddRectFilled(ImVec2((float)toggle_x, (float)toggle_y), ImVec2((float)(toggle_x+toggle_w), (float)(toggle_y+toggle_h)), IM_COL32(30, 148, 135, 255));
                 dl->AddText(ImVec2((float)(toggle_x + (toggle_w - (int)ImGui::CalcTextSize("ON").x) / 2), (float)(toggle_y + (toggle_h - (int)ImGui::CalcTextSize("ON").y) / 2)), IM_COL32(255,255,255,255), "ON");
             } else {
                 dl->AddRectFilled(ImVec2((float)toggle_x, (float)toggle_y), ImVec2((float)(toggle_x+toggle_w), (float)(toggle_y+toggle_h)), IM_COL32(68,68,68,255));
@@ -336,28 +376,28 @@ void menu_render(void) {
             else if (i == 3) selected = (g_uw_ratio_mode == UW_RATIO_21_9);
             else if (i == 4) selected = (g_uw_ratio_mode == UW_RATIO_32_9);
             if (selected) {
-                dl->AddRectFilled(ImVec2((float)(rx+2), (float)(ry+2)), ImVec2((float)(rx+rw-2), (float)(ry+rw-2)), IM_COL32(255,200,0,255));
+                dl->AddRectFilled(ImVec2((float)(rx+2), (float)(ry+2)), ImVec2((float)(rx+rw-2), (float)(ry+rw-2)), IM_COL32(204, 163, 71, 255));
             }
             dl->AddRect(ImVec2((float)rx, (float)ry), ImVec2((float)(rx+rw), (float)(ry+rw)), IM_COL32(200,200,200,255));
         } else if (it->type == 1 && it->val) {
             if (g_editing_item_ptr == it) {
                 int edit_x = mx + MENU_W - 130;
                 dl->AddRectFilled(ImVec2((float)edit_x, (float)(iy+2)), ImVec2((float)(edit_x+120), (float)(iy+ITEM_H-2)), IM_COL32(10,10,10,255));
-                dl->AddRectFilled(ImVec2((float)edit_x, (float)(iy+2)), ImVec2((float)(edit_x+120), (float)(iy+3)), IM_COL32(255,200,0,255));
-                dl->AddRectFilled(ImVec2((float)edit_x, (float)(iy+ITEM_H-3)), ImVec2((float)(edit_x+120), (float)(iy+ITEM_H-2)), IM_COL32(255,200,0,255));
+                dl->AddRectFilled(ImVec2((float)edit_x, (float)(iy+2)), ImVec2((float)(edit_x+120), (float)(iy+3)), IM_COL32(204, 163, 71, 255));
+                dl->AddRectFilled(ImVec2((float)edit_x, (float)(iy+ITEM_H-3)), ImVec2((float)(edit_x+120), (float)(iy+ITEM_H-2)), IM_COL32(204, 163, 71, 255));
                 char buf[48];
                 int show_cursor = ((GetTickCount() - g_edit_cursor_t) / 500) % 2;
                 snprintf(buf, sizeof(buf), "%s%s", g_edit_buf, show_cursor ? "_" : "");
                 ImVec2 es = ImGui::CalcTextSize(buf);
-                dl->AddText(ImVec2((float)(edit_x + 116 - (int)es.x), (float)(iy + (ITEM_H - (int)es.y) / 2)), IM_COL32(255,200,0,255), buf);
+                dl->AddText(ImVec2((float)(edit_x + 116 - (int)es.x), (float)(iy + (ITEM_H - (int)es.y) / 2)), IM_COL32(204, 163, 71, 255), buf);
             } else {
                 int val = *(int*)it->val;
                 char buf[32]; snprintf(buf, sizeof(buf), "%d", val);
                 int val_w = 80;
                 int val_x = mx + MENU_W - val_w - 8;
-                dl->AddRectFilled(ImVec2((float)val_x, (float)(iy+4)), ImVec2((float)(val_x+val_w), (float)(iy+ITEM_H-4)), IM_COL32(255,255,255,48));
+                dl->AddRectFilled(ImVec2((float)val_x, (float)(iy+4)), ImVec2((float)(val_x+val_w), (float)(iy+ITEM_H-4)), IM_COL32(204, 163, 71, 48));
                 ImVec2 vs = ImGui::CalcTextSize(buf);
-                dl->AddText(ImVec2((float)(val_x + (val_w - (int)vs.x) / 2), (float)(iy + (ITEM_H - (int)vs.y) / 2)), IM_COL32(255,200,0,255), buf);
+                dl->AddText(ImVec2((float)(val_x + (val_w - (int)vs.x) / 2), (float)(iy + (ITEM_H - (int)vs.y) / 2)), IM_COL32(204, 163, 71, 255), buf);
             }
         }
     }
@@ -366,7 +406,7 @@ void menu_render(void) {
     dl->AddRectFilled(ImVec2((float)(mx+8), (float)(foot_y-4)), ImVec2((float)(mx+MENU_W-8), (float)(foot_y-3)), IM_COL32(64,64,64,255));
     const char *foot = "ENTER: Toggle/Edit  |  ARROWS: Navigate  |  ESC: Cancel Edit";
     ImVec2 fs = ImGui::CalcTextSize(foot);
-    dl->AddText(ImVec2((float)(mx + (MENU_W - (int)fs.x) / 2), (float)foot_y), IM_COL32(128,128,128,255), foot);
+    dl->AddText(ImVec2((float)(mx + (MENU_W - (int)fs.x) / 2), (float)foot_y), IM_COL32(160,160,160,255), foot);
 }
 
 void menu_render_overlay(void) {
@@ -374,48 +414,68 @@ void menu_render_overlay(void) {
     const char *s = MOD_NAME " " MOD_VER " | F1: Menu | F2: Debug";
     int sw = g_sw; if (sw < 1) sw = 1280;
     ImVec2 ss = ImGui::CalcTextSize(s);
-    dl->AddText(ImVec2((float)((sw - (int)ss.x) / 2), 2.0f), IM_COL32(255,200,0,255), s);
+    dl->AddText(ImVec2((float)((sw - (int)ss.x) / 2), 2.0f), IM_COL32(204, 163, 71, 255), s);
 
     if (g_cheats.show_fps) {
         char buf[32]; snprintf(buf, sizeof(buf), "FPS: %d", g_fps);
         ImVec2 fs = ImGui::CalcTextSize(buf);
-        dl->AddText(ImVec2((float)(sw - (int)fs.x - 10.0f), 25.0f), IM_COL32(0,255,100,255), buf);
+        dl->AddText(ImVec2((float)(sw - (int)fs.x - 10.0f), 25.0f), IM_COL32(30, 148, 135, 255), buf);
     }
 }
 
 void menu_render_debug(void) {
     if (!g_cheats.show_debug) return;
-    ImDrawList *dl = ImGui::GetForegroundDrawList();
-    int sw = g_sw, sh = g_sh;
-    int pw = 360, px = sw - pw - 10, py = 30;
 
-    dl->AddRectFilled(ImVec2((float)px, (float)py), ImVec2((float)(px+pw), (float)(py+340)), IM_COL32(0,0,0,216));
-    dl->AddRectFilled(ImVec2((float)px, (float)py), ImVec2((float)(px+pw), (float)(py+2)), IM_COL32(255,200,0,255));
+    /* Render interactive ImGui Window for Game Strings Debugger */
+    ImGui::SetNextWindowSize(ImVec2(380, 420), ImGuiCond_FirstUseEver);
+    bool open = true;
+    if (ImGui::Begin("Game Strings Debugger", &open, ImGuiWindowFlags_NoCollapse)) {
+        static char search_query[64] = {0};
+        ImGui::InputText("Search Filter", search_query, sizeof(search_query));
+        ImGui::Separator();
 
-    const char *hdr = "=== GAME STRINGS ===";
-    ImVec2 hs = ImGui::CalcTextSize(hdr);
-    dl->AddText(ImVec2((float)(px + (pw - (int)hs.x) / 2), (float)py), IM_COL32(255,200,0,255), hdr);
+        ImGui::BeginChild("ScrollingRegion", ImVec2(0, 0), true);
+        if (g_entity_count <= 0) {
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "No entities found in memory.");
+        } else {
+            int displayed = 0;
+            for (int i = 0; i < g_entity_count; i++) {
+                const char *str = g_entities[i];
+                if (!str) continue;
 
-    if (g_entity_count <= 0) {
-        const char *msg = "No entities found";
-        ImVec2 ms = ImGui::CalcTextSize(msg);
-        dl->AddText(ImVec2((float)(px + (pw - (int)ms.x) / 2), (float)(py+25)), IM_COL32(230,60,60,255), msg);
-        return;
+                /* Case-insensitive query filter */
+                if (search_query[0] != '\0') {
+                    int match = 0;
+                    const char *s1 = str;
+                    const char *s2 = search_query;
+                    while (*s1) {
+                        const char *h = s1;
+                        const char *n = s2;
+                        while (*h && *n && tolower((unsigned char)*h) == tolower((unsigned char)*n)) {
+                            h++;
+                            n++;
+                        }
+                        if (!*n) {
+                            match = 1;
+                            break;
+                        }
+                        s1++;
+                    }
+                    if (!match) continue;
+                }
+
+                ImGui::Text("%d: %s", i, str);
+                displayed++;
+            }
+            if (displayed == 0) {
+                ImGui::TextColored(ImVec4(0.8f, 0.64f, 0.28f, 1.0f), "No matching strings.");
+            }
+        }
+        ImGui::EndChild();
     }
-
-    static int scroll = 0;
-    static DWORD scroll_t = 0;
-    if (GetTickCount() - scroll_t > 2000) { scroll_t = GetTickCount(); scroll++; if (scroll >= g_entity_count) scroll = 0; }
-
-    int y = py + 25;
-    for (int i = 0; i < 20 && y < sh - 20; i++) {
-        int idx = (scroll + i) % g_entity_count;
-        const char *str = g_entities[idx];
-        if (!str) continue;
-        char buf[56]; snprintf(buf, sizeof(buf), "%d: %s", idx, str);
-        ImU32 c2 = (i == 0) ? IM_COL32(255,200,0,255) : IM_COL32(180,180,180,255);
-        dl->AddText(ImVec2((float)(px+6), (float)y), c2, buf);
-        y += 16;
+    ImGui::End();
+    if (!open) {
+        g_cheats.show_debug = 0;
     }
 }
 

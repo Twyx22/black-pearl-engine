@@ -68,4 +68,28 @@ int find_text_section(DWORD *out_start, DWORD *out_size) {
     return 0;
 }
 
+DWORD find_pattern(const unsigned char *pattern, const char *mask, size_t pattern_len) {
+    DWORD text_start, text_size;
+    if (!find_text_section(&text_start, &text_size)) {
+        return 0;
+    }
+    unsigned char *code = (unsigned char*)text_start;
+    size_t mask_len = strlen(mask);
+    if (mask_len < pattern_len) pattern_len = mask_len;
+    
+    for (DWORD i = 0; i + pattern_len <= text_size; i++) {
+        int found = 1;
+        for (size_t j = 0; j < pattern_len; j++) {
+            if (mask[j] == 'x' && code[i + j] != pattern[j]) {
+                found = 0;
+                break;
+            }
+        }
+        if (found) {
+            return text_start + i;
+        }
+    }
+    return 0;
+}
+
 

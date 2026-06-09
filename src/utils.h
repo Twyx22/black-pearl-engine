@@ -17,6 +17,7 @@ void log_init(void);
 void LOG(const char *fmt, ...);
 void patch_mem(DWORD addr, const void *data, size_t len);
 int find_text_section(DWORD *out_start, DWORD *out_size);
+DWORD find_pattern(const unsigned char *pattern, const char *mask, size_t len);
 
 
 

@@ -10,31 +10,47 @@ CheatsState g_cheats = {0, 0, 0, 0, 100, 1, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAUL
 static unsigned char g_stud_sub_orig[2] = {0};
 static unsigned char g_stud_sbb_orig[2] = {0};
 static int g_stud_patched = 0;
+static DWORD g_stud_sub_addr = 0;
+static DWORD g_stud_sbb_addr = 0;
 
 void apply_stud_patch(void) {
     if (g_stud_patched) return;
     
+    if (!g_stud_sub_addr) {
+        unsigned char pattern[] = {0x29, 0xC3, 0x19, 0xD6}; // sub ebx, eax; sbb esi, edx
+        DWORD addr = find_pattern(pattern, "xxxx", 4);
+        if (addr) {
+            g_stud_sub_addr = addr;
+            g_stud_sbb_addr = addr + 2;
+            LOG("Infinite Studs: signature resolved dynamically at 0x%08X", g_stud_sub_addr);
+        } else {
+            LOG("Infinite Studs: pattern not found, using fallback address");
+            g_stud_sub_addr = STUD_SUB_ADDR;
+            g_stud_sbb_addr = STUD_SBB_ADDR;
+        }
+    }
+    
     /* Read original bytes */
-    memcpy(g_stud_sub_orig, (void*)STUD_SUB_ADDR, 2);
-    memcpy(g_stud_sbb_orig, (void*)STUD_SBB_ADDR, 2);
+    memcpy(g_stud_sub_orig, (void*)g_stud_sub_addr, 2);
+    memcpy(g_stud_sbb_orig, (void*)g_stud_sbb_addr, 2);
     
     /* NOP sub ebx,eax (2 bytes) */
     unsigned char nop2[2] = {0x90, 0x90};
     DWORD old;
-    if (VirtualProtect((LPVOID)STUD_SUB_ADDR, 2, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)STUD_SUB_ADDR, nop2, 2);
-        VirtualProtect((LPVOID)STUD_SUB_ADDR, 2, old, &old);
-        LOG("Infinite Studs: NOP'd sub ebx,eax at 0x%08X", STUD_SUB_ADDR);
+    if (VirtualProtect((LPVOID)g_stud_sub_addr, 2, PAGE_EXECUTE_READWRITE, &old)) {
+        memcpy((void*)g_stud_sub_addr, nop2, 2);
+        VirtualProtect((LPVOID)g_stud_sub_addr, 2, old, &old);
+        LOG("Infinite Studs: NOP'd sub ebx,eax at 0x%08X", g_stud_sub_addr);
     } else {
-        LOG("Infinite Studs: VirtualProtect FAILED at 0x%08X", STUD_SUB_ADDR);
+        LOG("Infinite Studs: VirtualProtect FAILED at 0x%08X", g_stud_sub_addr);
         return;
     }
     
     /* NOP sbb esi,edx (2 bytes) */
-    if (VirtualProtect((LPVOID)STUD_SBB_ADDR, 2, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)STUD_SBB_ADDR, nop2, 2);
-        VirtualProtect((LPVOID)STUD_SBB_ADDR, 2, old, &old);
-        LOG("Infinite Studs: NOP'd sbb esi,edx at 0x%08X", STUD_SBB_ADDR);
+    if (VirtualProtect((LPVOID)g_stud_sbb_addr, 2, PAGE_EXECUTE_READWRITE, &old)) {
+        memcpy((void*)g_stud_sbb_addr, nop2, 2);
+        VirtualProtect((LPVOID)g_stud_sbb_addr, 2, old, &old);
+        LOG("Infinite Studs: NOP'd sbb esi,edx at 0x%08X", g_stud_sbb_addr);
     }
     
     g_stud_patched = 1;
@@ -43,8 +59,8 @@ void apply_stud_patch(void) {
 
 void remove_stud_patch(void) {
     if (!g_stud_patched) return;
-    patch_mem(STUD_SUB_ADDR, g_stud_sub_orig, 2);
-    patch_mem(STUD_SBB_ADDR, g_stud_sbb_orig, 2);
+    patch_mem(g_stud_sub_addr, g_stud_sub_orig, 2);
+    patch_mem(g_stud_sbb_addr, g_stud_sbb_orig, 2);
     g_stud_patched = 0;
     LOG("Infinite Studs: unpatched");
 }
@@ -76,9 +92,28 @@ static int g_health_patched = 0;
 void apply_health_patch(void) {
     if (g_health_patched) return;
 
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    g_damage_patch_addr = base + DAMAGE_PATCH_OFFSET;
-    g_death_patch_addr  = base + DEATH_PATCH_OFFSET;
+    if (!g_damage_patch_addr) {
+        unsigned char dmg_pattern[] = {0xFE, 0x8D, 0x26, 0x0E, 0x00, 0x00}; // DEC [ebp+0xE26]
+        g_damage_patch_addr = find_pattern(dmg_pattern, "xxxxxx", 6);
+        if (g_damage_patch_addr) {
+            LOG("Invincibility: damage signature resolved dynamically at 0x%08X", g_damage_patch_addr);
+        } else {
+            LOG("Invincibility: damage pattern not found, using fallback");
+            DWORD base = (DWORD)GetModuleHandleA(NULL);
+            g_damage_patch_addr = base + DAMAGE_PATCH_OFFSET;
+        }
+    }
+    if (!g_death_patch_addr) {
+        unsigned char death_pattern[] = {0x88, 0x8E, 0x26, 0x0E, 0x00, 0x00}; // MOV [esi+0xE26], cl
+        g_death_patch_addr = find_pattern(death_pattern, "xxxxxx", 6);
+        if (g_death_patch_addr) {
+            LOG("Invincibility: death signature resolved dynamically at 0x%08X", g_death_patch_addr);
+        } else {
+            LOG("Invincibility: death pattern not found, using fallback");
+            DWORD base = (DWORD)GetModuleHandleA(NULL);
+            g_death_patch_addr = base + DEATH_PATCH_OFFSET;
+        }
+    }
 
     DWORD old;
     unsigned char nops[6] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
@@ -144,11 +179,6 @@ void remove_health_patch(void) {
 
 /* ================================================================
  * Breathe Underwater: NOP oxygen timer decrement.
- *
- * Cheat Engine script (_LEGOPirates.exe+37B910):
- *   Original: FE 8E 36 03 00 00  = DEC [ESI+00000336]
- *   Effect: Decrements oxygen timer when underwater.
- *   Patch: NOP (6 bytes) = oxygen timer never decrements = infinite breath.
  * ================================================================ */
 
 static DWORD g_breath_patch_addr = 0;
@@ -158,8 +188,17 @@ static int g_breath_patched = 0;
 void apply_breath_patch(void) {
     if (g_breath_patched) return;
 
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    g_breath_patch_addr = base + BREATH_PATCH_OFFSET;
+    if (!g_breath_patch_addr) {
+        unsigned char breath_pattern[] = {0xFE, 0x8E, 0x36, 0x03, 0x00, 0x00}; // DEC [esi+0x336]
+        g_breath_patch_addr = find_pattern(breath_pattern, "xxxxxx", 6);
+        if (g_breath_patch_addr) {
+            LOG("Breathe Underwater: signature resolved dynamically at 0x%08X", g_breath_patch_addr);
+        } else {
+            LOG("Breathe Underwater: pattern not found, using fallback");
+            DWORD base = (DWORD)GetModuleHandleA(NULL);
+            g_breath_patch_addr = base + BREATH_PATCH_OFFSET;
+        }
+    }
 
     DWORD old;
     unsigned char nops[6] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
