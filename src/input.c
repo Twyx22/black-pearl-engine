@@ -100,9 +100,9 @@ static HRESULT WINAPI hk_DirectInput8Create(HINSTANCE hinst, DWORD dwVersion, RE
                 orig_CreateDevice_di = (HRESULT (WINAPI *)(void*, REFGUID, void**, void*))g_fake_di8_vt[DI8_VT_CREATE_DEVICE];
                 g_fake_di8_vt[DI8_VT_CREATE_DEVICE] = (void*)hk_CreateDevice_di;
                 DWORD old;
-                VirtualProtect(ppvOut, sizeof(void*), PAGE_READWRITE, &old);
-                *(void***)ppvOut = g_fake_di8_vt;
-                VirtualProtect(ppvOut, sizeof(void*), old, &old);
+                VirtualProtect(*ppvOut, sizeof(void*), PAGE_READWRITE, &old);
+                *(void***)*ppvOut = g_fake_di8_vt;
+                VirtualProtect(*ppvOut, sizeof(void*), old, &old);
                 LOG("DirectInput8 interface hooked");
             }
         }

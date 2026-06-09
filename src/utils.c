@@ -28,6 +28,11 @@ void LOG(const char *fmt, ...) {
     va_start(args, fmt);
     len += vsnprintf(buf + len, sizeof(buf) - len, fmt, args);
     va_end(args);
+    if (len < 0) {
+        len = 0;
+    } else if (len >= (int)sizeof(buf) - 2) {
+        len = (int)sizeof(buf) - 2;
+    }
     buf[len] = '\n';
     buf[len + 1] = '\0';
 

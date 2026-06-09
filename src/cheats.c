@@ -427,4 +427,7 @@ void update_cheats(void) {
     force_custom_studs();
     force_golden_bricks();
     water_set_enabled(g_cheats.remove_water);
+    if (g_cheats.show_debug) {
+        scan_entities();
+    }
 }
