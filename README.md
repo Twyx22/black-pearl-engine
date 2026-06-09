@@ -1,11 +1,11 @@
 # Black Pearl Engine
 
-> **WIP** — Mod menu / cheat engine for **LEGO Pirates of the Caribbean: The Video Game**
+> **WIP** — Premium mod menu / cheat engine for **LEGO Pirates of the Caribbean: The Video Game**
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20(Wine%2FProton)-blue)
 ![Arch](https://img.shields.io/badge/Architecture-x86%20(32--bit)-orange)
-![Status](https://img.shields.io/badge/Status-WIP-yellow)
-![Version](https://img.shields.io/badge/Version-v4.0-green)
+![Status](https://img.shields.io/badge/Status-Active-green)
+![Version](https://img.shields.io/badge/Version-v4.1-gold)
 
 ![Menu Screenshot](screenshots/menu.png)
 
@@ -16,7 +16,7 @@
 - [Quick Start](#quick-start)
 - [Controls](#controls)
 - [Config](#config)
-- [Known Addresses](#known-addresses)
+- [Signature Scanning & Addresses](#signature-scanning--addresses)
 - [Project Structure](#project-structure)
 - [License](#license)
 
@@ -24,32 +24,32 @@
 
 | Cheat | Status | Notes |
 |-------|--------|-------|
-| **Infinite Studs** | ✅ | NOPs the `sub ebx,eax` + `sbb esi,edx` at fixed instruction addresses |
-| **Custom Stud Value** | ✅ | Writes to display address every frame |
-| **Golden Bricks** | ✅ | Forces golden brick count via module base + offset |
-| **Y Velocity** | ✅ | Dynamically scans `.text` for `FMUL [reg+0xD78]` and redirects to a user-controlled gravity multiplier. Slider range: **-10 to +1000** (negative = low gravity / float, positive = super jump) |
+| **Infinite Studs** | ✅ | **Dynamically scanned (AOB)** — NOPs `sub ebx,eax` + `sbb esi,edx` |
+| **Invincibility** | ✅ | **Dynamically scanned (AOB)** — Disables enemy damage (`DEC [ebp+0xE26]`) and death health reset (`MOV [esi+0xE26],cl`) |
+| **Breathe Underwater** | ✅ | **Dynamically scanned (AOB)** — NOPs oxygen timer decrement (`DEC [esi+0x336]`) |
+| **Custom Stud Value** | ✅ | Forces custom display value every frame |
+| **Golden Bricks** | ✅ | Forces golden brick count via base + offset |
+| **Y Velocity** | ✅ | Dynamically scans `.text` for `FMUL [reg+0xD78]` and redirects to a user-controlled gravity multiplier. Slider range: **-10 to +1000** |
 | **Character Scale** | ✅ | Dynamically scans `.text` for `FLD [reg+0xFB0]` and redirects to a user-controlled scale float. Slider range: **10% to 1000%** |
 | **Super Speed** | ✅ | Overwrites walk/run speed float constants in memory |
-| **Speed Mult** | ✅ | Scales game time delta via `GetTickCount`/`QueryPerformanceCounter`/`timeGetTime` hooks. Range: **1x to 100x** |
+| **Speed Mult** | ✅ | Scales game time delta via time hooks. Range: **1x to 100x** |
 | **Ultra-Wide Support** | ✅ | Hooks `SetTransform` to fix projection matrix for 21:9, 32:9, and custom aspect ratios |
-| **Breathe Underwater** | ✅ | NOPs oxygen timer decrement (`DEC [ESI+0x336]`) — infinite breath underwater |
-| **Menu UI** | ✅ | ImGui-based overlay with 5 tabs, keyboard navigation, text input for values |
-| **FPS Counter** | ✅ | Real-time FPS display (toggle with in-menu option) |
-| **Debug Info** | ✅ | Entity string table viewer (toggle with **F2**) |
+| **Menu UI** | ✅ | Custom ImGui-based overlay keyboard navigation and premium Dark Gold & Sea-Teal theme |
+| **FPS Counter** | ✅ | Real-time FPS display toggle |
+| **Debug Info** | ✅ | **Interactive Debugger** — Scrollable ImGui child window scanning entity string table with case-insensitive search and filter (toggle with **F2**) |
 | **Config File** | ✅ | Saves/loads all cheat toggles and values from `bpe.cfg` |
 
 ## What's Broken / WIP
 
 | Cheat | Status | Issue |
 |-------|--------|-------|
-| **Invincibility** | ⚠️ | Health decrement scanner finds some offsets, but reliability varies by game version |
-| **Time Freeze** | ⚠️ | Hooks `GetTickCount`/`QueryPerformanceCounter`/`timeGetTime` via MinHook; untested in all scenarios |
-| **Input Blocking** | ⚠️ | WndProc + PeekMessageA hooks; unreliable under Wine/Proton |
+| **Time Freeze** | ⚠️ | Hooks time APIs via MinHook; untested in all scenarios |
+| **Input Blocking** | ✅ | Subclassed WndProc + DirectInput8 keyboard hooks; fully reliable on Windows and Wine |
 | **NoClip** | ❌ | Placeholder — not yet implemented |
 | **Stud Magnet** | ❌ | Placeholder — not yet implemented |
-| **Extra Hearts / Regenerate** | ❌ | Placeholders in Health tab |
+| **Extra Hearts / Regenerate** | ❌ | Placeholders in Health tab (redundant with Invincibility) |
 
-Most hardcoded addresses were found via Cheat Engine and are specific to the GOG/retail build. They will likely differ for Steam or other versions. Cheats that use dynamic `.text` section scanning (Y Velocity, Character Scale, Invincibility) are more resilient to game patches.
+Cheats that use dynamic `.text` section scanning (Y Velocity, Character Scale, Invincibility, Studs, and Oxygen) are highly resilient to game patches and will work across different game versions (Steam, GOG, retail).
 
 ## Quick Start
 
@@ -67,15 +67,10 @@ make clean && make
 make install   # copies to game directory
 ```
 
-**Windows (MSYS2/MinGW):**
-1. Install [MSYS2](https://www.msys2.org/) (or via winget: `winget install MSYS2.MSYS2`)
-2. In MSYS2 MINGW32 shell, install the toolchain:
+**Windows (Standalone Toolchain / MSYS2):**
+1. Download a standalone 32-bit compiler such as **[WinLibs i686-posix-dwarf](https://winlibs.com/)** and extract it to `C:\ProgramData\mingw32`.
+2. Build:
    ```bash
-   pacman -S mingw-w64-i686-toolchain
-   ```
-3. Build:
-   ```bash
-   cd /path/to/black-pearl-engine
    mingw32-make clean && mingw32-make
    mingw32-make install   # copies to game directory
    ```
@@ -89,7 +84,7 @@ make install   # copies to game directory
 | Key | Action |
 |-----|--------|
 | **F1** | Toggle Menu (saves config on close) |
-| **F2** | Toggle Debug Info |
+| **F2** | Toggle Game Strings Debug Window |
 | **↑ / ↓** | Navigate items |
 | **← / →** | Switch tabs |
 | **Enter** | Toggle cheat / Edit value |
@@ -107,96 +102,35 @@ make install   # copies to game directory
 | **Visual** | FPS Counter, Debug Info |
 | **UltraWide** | Enable Ultra-Wide, Ratio selection (Auto / 16:9 / 21:9 / 32:9) |
 
-### Cheat Details
+---
 
-- **Y Velocity** — Toggle on/off. Use **Y Strength** slider to control vertical movement multiplier. Values: -10 (low gravity / float) to +1000 (extreme jump height). Default: 100 (10x normal gravity).
-- **Character Scale** — Toggle on/off. Use **Scale %** slider to resize the character model. Range: 10% (tiny) to 1000% (giant). Default: 100 (normal size).
-- **Speed Mult** — Value slider (1–100). Multiplies all game time deltas, effectively speeding up the entire game engine including animations, physics, and AI. Default: 1 (normal speed).
+## Signature Scanning & Addresses
 
-## Config
+Most static addresses are relative to `_LEGOPirates.exe` base. Patches using AOB (Array of Bytes) patterns scan the game's executable `.text` segment on startup for stability across versions.
 
-Settings auto-save on menu close (F1) and on game exit.  
-Edit `bpe.cfg` to set default values:
+### Dynamically Scanned Patches (AOB)
 
-```ini
-# Black Pearl Engine config
-# Generated automatically. Edit and restart to apply.
+| Cheat | Pattern Scanned | Purpose / Patch Action |
+|-------|----------------|------------------------|
+| **Y Velocity** | `D8 8? 78 0D 00 00` | Redirects gravity factor `FMUL [reg+0xD78]` to global float |
+| **Character Scale** | `D9 8? B0 0F 00 00` | Redirects scale `FLD [reg+0xFB0]` to global float |
+| **Infinite Studs** | `29 C3 19 D6` | Locates and NOPs `sub ebx,eax` + `sbb esi,edx` |
+| **Enemy Damage** | `FE 8D 26 0E 00 00` | Locates and NOPs `DEC [ebp+0xE26]` |
+| **Death Health Reset** | `88 8E 26 0E 00 00` | Locates and NOPs `MOV [esi+0xE26],cl` |
+| **Breathe Underwater** | `FE 8E 36 03 00 00` | Locates and NOPs `DEC [esi+0x336]` |
 
-infinite_studs=1
-invincible=0
-super_speed=0
-super_jump=0
-super_jump_scale=100
-speed_mult=1
-time_freeze=0
-noclip=0
-show_debug=0
-show_fps=0
-score_mult=1
-force_custom_studs=1
-custom_stud_value=999999
-force_golden_bricks=1
-golden_brick_value=85
-uw_enabled=0
-uw_ratio=0
-char_scale=0
-char_scale_val=100
-underwater_breath=0
-```
+### Hardcoded Offsets & Fallbacks
 
-### Config Keys
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `infinite_studs` | toggle | 0 | NOP the stud subtraction instruction |
-| `invincible` | toggle | 0 | NOP health decrement instructions |
-| `super_speed` | toggle | 0 | Override walk/run speed constants |
-| `super_jump` | toggle | 0 | Enable Y Velocity gravity modifier |
-| `super_jump_scale` | int | 100 | Gravity multiplier ×10 (e.g. 100 = 10.0×) |
-| `speed_mult` | int | 1 | Game time multiplier (1–100×) |
-| `time_freeze` | toggle | 0 | Freeze game time |
-| `noclip` | toggle | 0 | Placeholder |
-| `show_debug` | toggle | 0 | Show entity debug panel |
-| `show_fps` | toggle | 0 | Show FPS counter |
-| `score_mult` | int | 1 | Stud score multiplier (1–10) |
-| `force_custom_studs` | toggle | 1 | Force stud display to custom value |
-| `custom_stud_value` | int | 999999 | Custom stud count to display |
-| `force_golden_bricks` | toggle | 1 | Force golden brick count |
-| `golden_brick_value` | int | 85 | Golden brick count to force |
-| `uw_enabled` | toggle | 0 | Enable ultra-wide projection fix |
-| `uw_ratio` | int | 0 | Aspect ratio mode (0=Auto, 1=16:9, 2=21:9, 3=32:9) |
-| `char_scale` | toggle | 0 | Enable character scale modifier |
-| `char_scale_val` | int | 100 | Character scale percentage (10–1000) |
-| `underwater_breath` | toggle | 0 | NOP oxygen timer decrement for infinite underwater breath |
-
-## Known Addresses
-
-Addresses are `_LEGOPirates.exe + offset` from module base.
-
-### Hardcoded Addresses
-
-These are still fixed and may break across game versions:
-
-| Purpose | Address | Notes |
-|---------|---------|-------|
-| Stud subtract | `0x006B1BC5` (`sub ebx,eax`) + `0x006B1BC7` (`sbb esi,edx`) | NOP'd for infinite studs |
+| Purpose | Address / Offset | Notes |
+|---------|------------------|-------|
 | Stud display | `0x0369B660` (4 bytes) | Forced each frame for custom value |
 | Golden bricks | `base + 0x00B776E4` (4 bytes) | Forced each frame |
 | Entity table | `base + 0x00C8F400` | Pointer array to entity strings |
 | Walk speed | `0x00E24C50` (float) | Overwritten for Super Speed |
-| Oxygen timer | `base + 0x0037B910` (`DEC [ESI+336]`) | NOP'd for Breathe Underwater |
 | Run speed | `0x00E24C54` (float) | Overwritten for Super Speed |
 | Aspect ratio | `base + 0x006740B0` (float) | Saved/restored for Ultra-Wide |
 
-### Dynamically Scanned Addresses
-
-These cheats scan the `.text` section at runtime for instruction patterns, making them resilient to game patches:
-
-| Cheat | Pattern Scanned | Purpose |
-|-------|----------------|---------|
-| **Y Velocity** | `D8 8? 78 0D 00 00` (`FMUL [reg+0xD78]`) | Redirects gravity factor to user-controlled float |
-| **Character Scale** | `D9 8? B0 0F 00 00` (`FLD [reg+0xFB0]`) | Redirects character scale load to user-controlled float |
-| **Invincibility** | `DEC [reg+0x864]` pattern | NOPs health decrement instructions |
+---
 
 ## Project Structure
 
@@ -205,10 +139,10 @@ src/
 ├── config.h             # Memory addresses, offsets, and constants
 ├── config_loader.c/h    # bpe.cfg save/load (key-value mapping)
 ├── cheats.c/h           # All cheat implementations (patching, scanning, updating)
-├── menu.c/h             # ImGui-based overlay menu (5 tabs, keyboard nav)
-├── hooks.c/h            # D3D9 vtable hooks (EndScene, Present, Reset), time hooks, WndProc subclass
-├── input.c/h            # DirectInput8 hooks for keyboard/mouse capture
-├── utils.c/h            # Logging, memory patching, .text section finder
+├── menu.c/h             # ImGui-based overlay menu and debugger window
+├── hooks.c/h            # D3D9 vtable hooks, time hooks, WndProc subclass
+├── input.c/h            # DirectInput8 hooks for keyboard capture
+├── utils.c/h            # Logging, memory patching, AOB pattern scanner
 ├── uw.c/h               # Ultra-wide support (aspect ratio patching, SetTransform hook)
 ├── d3d9_proxy.c         # DllMain + Direct3DCreate9 proxy (entry point)
 └── d3d9_proxy.def       # DLL exports
@@ -248,7 +182,7 @@ graph TD
     
     H --> V[ImGui render]
     V --> W[Menu tabs]
-    V --> X[Overlay / FPS / Debug]
+    V --> X[Game Strings Debugger Window]
 ```
 
 ## License
