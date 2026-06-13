@@ -107,4 +107,24 @@
 #define MENU_DEFAULT_WIDTH      480
 #define MENU_DEFAULT_HEIGHT     440
 
+
+/* --- Damage System Mods --- */
+
+/* Reverse Damage: DEC [EBP+0E26] -> INC [EBP+0E26] (1 byte at offset+1) */
+#define REVERSE_DAMAGE_OFFSET       0x3D3B0B
+#define REVERSE_DAMAGE_SIZE         6
+
+/* One Heart Mode: patch health init values to 1 instead of 4/3 */
+#define HEALTH_INIT_4_OFFSET        0x2BC97A
+#define HEALTH_INIT_3_OFFSET        0x4877FC
+#define HEALTH_INIT_SIZE            7
+
+/* Knockback: NOP the CALL instruction (5 bytes) within TakeDamage */
+#define KNOCKBACK_CALL_OFFSET       0x3D3A5F
+#define KNOCKBACK_CALL_SIZE         5
+
+/* HitReaction7: NOP the CALL instruction (5 bytes) */
+#define HITREACT_CALL_OFFSET        0x052415
+#define HITREACT_CALL_SIZE          5
+
 #endif

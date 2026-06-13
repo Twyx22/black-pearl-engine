@@ -32,6 +32,12 @@ static ConfigMapping g_map[] = {
     {"char_scale_val",      &g_cheats.char_scale_val},
     {"remove_water",        &g_cheats.remove_water},
     {"underwater_breath",    &g_cheats.underwater_breath},
+    {"reverse_damage",       &g_cheats.reverse_damage},
+    {"one_heart",            &g_cheats.one_heart},
+    {"no_knockback",         &g_cheats.no_knockback},
+    {"no_hit_reaction",      &g_cheats.no_hit_reaction},
+    {"damage_response_only", &g_cheats.damage_response_only},
+    {"one_hit_kill",         &g_cheats.one_hit_kill},
 };
 
 #define MAP_COUNT (sizeof(g_map) / sizeof(g_map[0]))

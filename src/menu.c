@@ -25,9 +25,15 @@ static DWORD g_edit_cursor_t = 0;
 
 static Item health_items[] = {
     {"Invincibility", 0, &g_cheats.invincible},
-    {"Extra Hearts", 0, NULL},
-    {"Regenerate", 0, NULL},
     {"Breathe Underwater", 0, &g_cheats.underwater_breath},
+};
+static Item damage_items[] = {
+    {"Reverse Damage", 0, &g_cheats.reverse_damage},
+    {"One Heart Mode", 0, &g_cheats.one_heart},
+    {"One-Hit-Kill", 0, &g_cheats.one_hit_kill},
+    {"Damage Response Only", 0, &g_cheats.damage_response_only},
+    {"No Knockback", 0, &g_cheats.no_knockback},
+    {"No Hit Reactions", 0, &g_cheats.no_hit_reaction},
 };
 static Item stud_items[] = {
     {"Infinite Studs", 0, &g_cheats.infinite_studs},
@@ -82,7 +88,8 @@ static int uw_items_cb(int sel) {
 }
 
 Tab tabs[] = {
-    {"Health", health_items, 4, NULL},
+    {"Health", health_items, 2, NULL},
+    {"Damage", damage_items, 6, NULL},
     {"Studs", stud_items, 7, NULL},
     {"Fun", fun_items, 8, NULL},
     {"Visual", visual_items, 3, NULL},

@@ -17,6 +17,12 @@ typedef struct {
     int char_scale_val;
     int remove_water;
     int underwater_breath;
+    int reverse_damage;
+    int one_heart;
+    int no_knockback;
+    int no_hit_reaction;
+    int damage_response_only;
+    int one_hit_kill;
 } CheatsState;
 
 extern CheatsState g_cheats;
@@ -45,6 +51,24 @@ void force_golden_bricks(void);
 extern const char *g_entities[64];
 extern int g_entity_count;
 void scan_entities(void);
+
+void apply_reverse_damage(void);
+void remove_reverse_damage(void);
+
+void apply_one_heart(void);
+void remove_one_heart(void);
+
+void apply_no_knockback(void);
+void remove_no_knockback(void);
+
+void apply_no_hit_reaction(void);
+void remove_no_hit_reaction(void);
+
+void apply_damage_response_only(void);
+void remove_damage_response_only(void);
+
+void apply_one_hit_kill(void);
+void remove_one_hit_kill(void);
 
 void update_cheats(void);
 
