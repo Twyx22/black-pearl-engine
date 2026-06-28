@@ -6,6 +6,10 @@
 #include "input.h"
 #include "config.h"
 #include "water.h"
+#include "presets.h"
+#include "favorites.h"
+#include "hotkeys.h"
+#include "free_camera.h"
 #include "imgui.h"
 #include "backends/imgui_impl_win32.h"
 #include "backends/imgui_impl_dx9.h"
@@ -119,6 +123,9 @@ void install_time_hooks(void) {
     }
     g_time_hooks_installed = 1;
     LOG("Time hooks installed via MinHook");
+    hotkeys_init();
+    presets_init();
+    favorites_init();
 }
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -190,6 +197,8 @@ static HRESULT WINAPI hk_EndScene(IDirect3DDevice9 *d) {
     }
 
     menu_update_input();
+
+    /* Free camera input (handled in menu_update_input if active) */
     update_cheats();
 
     return orig_EndScene(d);

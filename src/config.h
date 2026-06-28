@@ -38,6 +38,12 @@
 #define DEATH_PATCH_OFFSET      0x4A3D35
 #define DEATH_PATCH_SIZE        6
 
+/* --- Underwater Breath --- */
+
+/* _LEGOPirates.exe+37B910: DEC [esi+00000336] - oxygen timer decrement */
+#define BREATH_PATCH_OFFSET    0x37B910
+#define BREATH_PATCH_SIZE      6
+
 /* --- Movement Speed --- */
 
 /* Float addresses for walk/run speed constants */
@@ -64,7 +70,6 @@
     FMUL [reg+0xD78] instances and redirects them to our own
     gravity float, acting as a Y-velocity modifier. */
 
-
 /* --- Entity Scanner --- */
 
 /* Offset to the game's entity string table */
@@ -78,16 +83,115 @@
 /* Default golden bricks value when forced */
 #define GOLDEN_BRICK_DEFAULT    85
 
-/* --- Underwater Breath --- */
-
-/* _LEGOPirates.exe+37B910: DEC [esi+00000336] - oxygen timer decrement */
-#define BREATH_PATCH_OFFSET    0x37B910
-#define BREATH_PATCH_SIZE      6
-
 /* --- Custom Studs --- */
 
 /* Default custom stud value when forced */
 #define CUSTOM_STUD_DEFAULT     999999
+
+/* --- Native Cheat System --- */
+
+/* Pointer table to cheat name strings in .rdata */
+#define CHEAT_STRING_TABLE          0xC8F480
+
+/* cheats available in the game, lowercase Squirrel-style names */
+#define CHEAT_STR_SCOREX10          0xA6ED18
+#define CHEAT_STR_SCOREX8           0xA6ED28
+#define CHEAT_STR_SCOREX6           0xA6ED38
+#define CHEAT_STR_SCOREX4           0xA6ED48
+#define CHEAT_STR_SCOREX2           0xA6ED58
+#define CHEAT_STR_INVINCIBILITY     0xA6ED68
+#define CHEAT_STR_ALWAYS_SCORE_MULT 0xA6ED7C
+#define CHEAT_STR_EXTRAHEARTS       0xA6ED98
+#define CHEAT_STR_MINIKIT_DETECTOR  0xA6EDAC
+#define CHEAT_STR_POWERBRICK_DET    0xA6EDC4
+#define CHEAT_STR_REGENERATE_HEARTS 0xA6EDE0
+#define CHEAT_STR_BREATHEUNDERWATER 0xA6EDF8
+#define CHEAT_STR_STUD_MAGNET       0xA6EE10
+#define CHEAT_STR_DOOMEDRECOVERY    0xA6EE24
+#define CHEAT_STR_CHARACTER_STUDS   0xA6EE3C
+#define CHEAT_STR_FASTBUILD         0xA6EE54
+#define CHEAT_STR_EXTRATOGGLE       0xA6EE64
+#define CHEAT_STR_FASTFIX           0xA6EE78
+#define CHEAT_STR_FASTDIG           0xA6EE88
+#define CHEAT_STR_DISGUISES         0xA6EE98
+
+/* CHEAT_ strings (uppercase C++ style) */
+#define CHEAT_CAPS_INVINCIBILITY    0xBFF580
+#define CHEAT_CAPS_STUD_MAGNET      0xBFF6D4
+#define CHEAT_CAPS_SCOREX10         0xBFF48C
+#define CHEAT_CAPS_SCOREX8          0xBFF4CC
+#define CHEAT_CAPS_SCOREX6          0xBFF500
+#define CHEAT_CAPS_SCOREX4          0xBFF540
+#define CHEAT_CAPS_SCOREX3          0xBFF560
+#define CHEAT_CAPS_SCOREX2          0xBFF570
+#define CHEAT_CAPS_ALWAYS_SCORE_MULT 0xBFF3E0
+#define CHEAT_CAPS_EXTRAHEARTS       0xBFF3FC
+#define CHEAT_CAPS_BREATHEUNDERWATER 0xBFF3A0
+#define CHEAT_CAPS_REGENERATE_HEARTS 0xBFF528
+#define CHEAT_CAPS_FASTBUILD         0xBFF550
+#define CHEAT_CAPS_SUPERSLAP         0xBFF6FC
+#define CHEAT_CAPS_SELFDESTRUCT     0xBF89EC
+#define CHEAT_CAPS_EXPLODING_BLASTER 0xBFF674
+#define CHEAT_CAPS_SUPERBLASTERS    0xBFF5CC
+#define CHEAT_CAPS_ROCKETS          0xBFF4DC
+#define CHEAT_CAPS_DISGUISES        0xBFF850
+#define CHEAT_CAPS_EXTRATOGGLE      0xBFF86C
+#define CHEAT_CAPS_FASTFIX          0xBFF46C
+#define CHEAT_CAPS_FASTDIG          0xBFF47C
+#define CHEAT_CAPS_INFINITE_TORPEDOS 0xBFF49C
+#define CHEAT_CAPS_CHARACTER_STUDS   0xBFF6A8
+#define CHEAT_CAPS_DOOMEDRECOVERY    0xBFF3B8
+#define CHEAT_CAPS_STUD_MAGNET_UPPER 0xBFF6D4
+#define CHEAT_CAPS_MINIKIT_DETECTOR  0xBFF510
+#define CHEAT_CAPS_POWERBRICK_DET    0xBFF778
+#define CHEAT_CAPS_GOLDBRICK_DETECTOR 0xBFF740
+
+/* --- Collision / NoClip --- */
+
+#define NO_CHARACTER_COLLISIONS_STR 0xBE0A38
+#define NO_COLLISION_STR            0xBF6820
+#define DISABLE_COLLISION_STR       0xBB9EE8
+#define COLLISION_FUNC_ADDR         0x6AC280  // sub_6AC280 - collision handling
+
+/* --- Ammo System --- */
+
+#define SET_AMMO_STR                0xC00328
+#define MAX_AMMO_STR                0xBEDC7C
+
+/* --- Combo System --- */
+
+#define EASY_COMBOS_STR             0xBF1AE4
+#define ALWAYS_START_COMBOS_FIRST   0xBF1AF0
+#define COMBO_STR                   0xBE1438
+
+/* --- Punch / Damage --- */
+
+#define PUNCH_ALWAYS_STUN_STR       0xBE333C
+#define SWORD_COMBO1_STR            0xBE7010
+#define SWORD_COMBO2_STR            0xBE7000
+
+/* --- Cannonballs --- */
+
+#define CANNONBALL2_STR             0xA745D8
+#define CANNON_MK_STR_BASE          0xA745E4
+
+/* --- Scoring --- */
+
+#define SCOPE_MULTIPLY_STR          0xC03DBC
+#define MULTIPLY_BY_STR             0xC03F0C
+#define STATUS_GOLDBRICK_SCORE_STR  0xBE726C
+#define DOUBLE_SCORE_STR            0xBF36A0
+#define DOUBLE_SCORE_SOCK_STR       0xBF466C
+
+/* --- Level Editor --- */
+
+#define LEVEL_EDITOR_CTOR           0x0058EB50  // Constructor (already defined)
+#define LEVEL_EDITOR_CLASS_STR      0xBC108C
+#define LEVEL_EDITOR_RTTI_STR       0xDFEE0C
+#define LEVELEDITOR_MANAGER_RTTI    0xDFEE28
+
+/* Constructor offset for LevelEditor class (Ghidra: 0x0058eb50, offset = 0x58eb50 - 0x400000) */
+#define LEVEL_EDITOR_CTOR_OFFSET    0x18EB50
 
 /* --- DirectInput8 VTable Indices --- */
 
@@ -97,16 +201,10 @@
 #define DIDEV_VT_ACQUIRE            7
 #define DIDEV_VT_UNACQUIRE          8
 
-/* --- LevelEditor --- */
-
-/* Constructor offset for LevelEditor class (Ghidra: 0x0058eb50, offset = 0x58eb50 - 0x400000) */
-#define LEVEL_EDITOR_CTOR_OFFSET    0x18EB50
-
 /* --- Menu Settings --- */
 
 #define MENU_DEFAULT_WIDTH      480
 #define MENU_DEFAULT_HEIGHT     440
-
 
 /* --- Damage System Mods --- */
 

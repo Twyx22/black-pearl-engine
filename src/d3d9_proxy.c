@@ -2,6 +2,7 @@
 #include "hooks.h"
 #include "input.h"
 #include "config_loader.h"
+#include "native_cheats.h"
 #include <MinHook.h>
 
 BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID reserved) {
@@ -18,6 +19,7 @@ BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID reserved) {
             }
             load_config();
             install_time_hooks();
+            native_cheats_init();
             MH_EnableHook(MH_ALL_HOOKS);
             return TRUE;
         case DLL_PROCESS_DETACH:

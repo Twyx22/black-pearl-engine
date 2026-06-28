@@ -3,8 +3,12 @@
 #include "hooks.h"
 #include "config.h"
 #include "water.h"
+#include "noclip.h"
+#include "infinite_ammo.h"
+#include "score_mult.h"
+#include "stud_magnet.h"
 
-CheatsState g_cheats = {0, 0, 0, 0, 100, 1, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0};
+CheatsState g_cheats = {0, 0, 0, 0, 100, 1, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 75, 0, 0, 0, 0, 0};
 
 /* Stud patch: NOP sub ebx,eax and sbb esi,edx at fixed addresses (Cheat Engine found) */
 static unsigned char g_stud_sub_orig[2] = {0};
@@ -83,99 +87,79 @@ void remove_stud_patch(void) {
  * Health offset is 0xE26 in the player entity struct.
  * ================================================================ */
 
-static DWORD g_damage_patch_addr = 0;
-static DWORD g_death_patch_addr = 0;
-static unsigned char g_damage_orig[DAMAGE_PATCH_SIZE];
-static unsigned char g_death_orig[DEATH_PATCH_SIZE];
-static int g_health_patched = 0;
+static unsigned char g_health_dmg_pat[] = {0xFE, 0x8D, 0x26, 0x0E, 0x00, 0x00};
+static unsigned char g_health_death_pat[] = {0x88, 0x8E, 0x26, 0x0E, 0x00, 0x00};
+static PatchRecord g_health_dmg_rec = {0};
+static PatchRecord g_health_death_rec = {0};
+static AobCache g_health_dmg_cache = {0};
+static AobCache g_health_death_cache = {0};
 
 void apply_health_patch(void) {
-    if (g_health_patched) return;
+    if (g_health_dmg_rec.active && g_health_death_rec.active) return;
 
-    if (!g_damage_patch_addr) {
-        unsigned char dmg_pattern[] = {0xFE, 0x8D, 0x26, 0x0E, 0x00, 0x00}; // DEC [ebp+0xE26]
-        g_damage_patch_addr = find_pattern(dmg_pattern, "xxxxxx", 6);
-        if (g_damage_patch_addr) {
-            LOG("Invincibility: damage signature resolved dynamically at 0x%08X", g_damage_patch_addr);
-        } else {
-            LOG("Invincibility: damage pattern not found, using fallback");
+    /* Resolve damage patch address */
+    if (!g_health_dmg_rec.addr) {
+        g_health_dmg_cache.pattern = g_health_dmg_pat;
+        g_health_dmg_cache.mask = "xxxxxx";
+        g_health_dmg_cache.len = 6;
+        DWORD addr = find_pattern_cached(&g_health_dmg_cache);
+        if (!addr) {
             DWORD base = (DWORD)GetModuleHandleA(NULL);
-            g_damage_patch_addr = base + DAMAGE_PATCH_OFFSET;
-        }
-    }
-    if (!g_death_patch_addr) {
-        unsigned char death_pattern[] = {0x88, 0x8E, 0x26, 0x0E, 0x00, 0x00}; // MOV [esi+0xE26], cl
-        g_death_patch_addr = find_pattern(death_pattern, "xxxxxx", 6);
-        if (g_death_patch_addr) {
-            LOG("Invincibility: death signature resolved dynamically at 0x%08X", g_death_patch_addr);
+            addr = base + DAMAGE_PATCH_OFFSET;
+            LOG("Invincibility: damage pattern not found, using fallback 0x%08X", addr);
         } else {
-            LOG("Invincibility: death pattern not found, using fallback");
-            DWORD base = (DWORD)GetModuleHandleA(NULL);
-            g_death_patch_addr = base + DEATH_PATCH_OFFSET;
+            LOG("Invincibility: damage signature resolved dynamically at 0x%08X", addr);
         }
+        g_health_dmg_rec.addr = addr;
+        g_health_dmg_rec.size = DAMAGE_PATCH_SIZE;
     }
 
-    DWORD old;
-    unsigned char nops[6] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
-
-    /* Save original bytes from both addresses */
-    if (!VirtualProtect((LPVOID)g_damage_patch_addr, DAMAGE_PATCH_SIZE, PAGE_EXECUTE_READ, &old)) {
-        LOG("Invincibility: cannot read damage patch target 0x%08X", g_damage_patch_addr);
-        return;
+    /* Resolve death patch address */
+    if (!g_health_death_rec.addr) {
+        g_health_death_cache.pattern = g_health_death_pat;
+        g_health_death_cache.mask = "xxxxxx";
+        g_health_death_cache.len = 6;
+        DWORD addr = find_pattern_cached(&g_health_death_cache);
+        if (!addr) {
+            DWORD base = (DWORD)GetModuleHandleA(NULL);
+            addr = base + DEATH_PATCH_OFFSET;
+            LOG("Invincibility: death pattern not found, using fallback 0x%08X", addr);
+        } else {
+            LOG("Invincibility: death signature resolved dynamically at 0x%08X", addr);
+        }
+        g_health_death_rec.addr = addr;
+        g_health_death_rec.size = DEATH_PATCH_SIZE;
     }
-    memcpy(g_damage_orig, (void*)g_damage_patch_addr, DAMAGE_PATCH_SIZE);
-    VirtualProtect((LPVOID)g_damage_patch_addr, DAMAGE_PATCH_SIZE, old, &old);
-
-    if (!VirtualProtect((LPVOID)g_death_patch_addr, DEATH_PATCH_SIZE, PAGE_EXECUTE_READ, &old)) {
-        LOG("Invincibility: cannot read death patch target 0x%08X", g_death_patch_addr);
-        return;
-    }
-    memcpy(g_death_orig, (void*)g_death_patch_addr, DEATH_PATCH_SIZE);
-    VirtualProtect((LPVOID)g_death_patch_addr, DEATH_PATCH_SIZE, old, &old);
 
     /* NOP the damage instruction: DEC [EBP+0E26] -> NOP x6 */
-    if (!VirtualProtect((LPVOID)g_damage_patch_addr, DAMAGE_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        LOG("Invincibility: VirtualProtect FAILED for damage patch at 0x%08X", g_damage_patch_addr);
+    unsigned char nops_dmg[DAMAGE_PATCH_SIZE];
+    memset(nops_dmg, 0x90, DAMAGE_PATCH_SIZE);
+    if (!patch_apply(&g_health_dmg_rec, nops_dmg)) {
+        LOG("Invincibility: failed to patch damage at 0x%08X", g_health_dmg_rec.addr);
         return;
     }
-    memcpy((void*)g_damage_patch_addr, nops, DAMAGE_PATCH_SIZE);
-    VirtualProtect((LPVOID)g_damage_patch_addr, DAMAGE_PATCH_SIZE, old, &old);
-    LOG("Invincibility: NOP'd DEC [EBP+0E26] at 0x%08X (enemy damage disabled)", g_damage_patch_addr);
+    LOG("Invincibility: NOP'd DEC [EBP+0E26] at 0x%08X (enemy damage disabled)", g_health_dmg_rec.addr);
 
     /* NOP the death instruction: MOV [ESI+0E26],CL -> NOP x6 */
-    if (!VirtualProtect((LPVOID)g_death_patch_addr, DEATH_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        LOG("Invincibility: VirtualProtect FAILED for death patch at 0x%08X", g_death_patch_addr);
+    unsigned char nops_death[DEATH_PATCH_SIZE];
+    memset(nops_death, 0x90, DEATH_PATCH_SIZE);
+    if (!patch_apply(&g_health_death_rec, nops_death)) {
+        /* Rollback damage patch */
+        patch_restore(&g_health_dmg_rec);
+        LOG("Invincibility: failed to patch death at 0x%08X, damage rolled back", g_health_death_rec.addr);
         return;
     }
-    memcpy((void*)g_death_patch_addr, nops, DEATH_PATCH_SIZE);
-    VirtualProtect((LPVOID)g_death_patch_addr, DEATH_PATCH_SIZE, old, &old);
-    LOG("Invincibility: NOP'd MOV [ESI+0E26],CL at 0x%08X (death health reset disabled)", g_death_patch_addr);
+    LOG("Invincibility: NOP'd MOV [ESI+0E26],CL at 0x%08X (death health reset disabled)", g_health_death_rec.addr);
 
-    g_health_patched = 1;
     LOG("Invincibility: patched (enemy damage + death reset disabled)");
 }
-
 void remove_health_patch(void) {
-    if (!g_health_patched) return;
-
-    DWORD old;
-
-    /* Restore damage instruction */
-    if (VirtualProtect((LPVOID)g_damage_patch_addr, DAMAGE_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)g_damage_patch_addr, g_damage_orig, DAMAGE_PATCH_SIZE);
-        VirtualProtect((LPVOID)g_damage_patch_addr, DAMAGE_PATCH_SIZE, old, &old);
-    }
-
-    /* Restore death instruction */
-    if (VirtualProtect((LPVOID)g_death_patch_addr, DEATH_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)g_death_patch_addr, g_death_orig, DEATH_PATCH_SIZE);
-        VirtualProtect((LPVOID)g_death_patch_addr, DEATH_PATCH_SIZE, old, &old);
-    }
-
-    g_health_patched = 0;
-    LOG("Invincibility: unpatched");
+    int had_dmg = g_health_dmg_rec.active;
+    int had_death = g_health_death_rec.active;
+    if (had_death) patch_restore(&g_health_death_rec);
+    if (had_dmg) patch_restore(&g_health_dmg_rec);
+    if (had_dmg || had_death) LOG("Invincibility: unpatched");
 }
-
 
 /* ================================================================
  * Breathe Underwater: NOP oxygen timer decrement.
@@ -453,55 +437,46 @@ void scan_entities(void) {
  *   Only the ModR/M byte changes: 0x8D -> 0x8C.
  * ================================================================ */
 
-static DWORD g_rev_damage_addr = 0;
-static unsigned char g_rev_damage_orig[REVERSE_DAMAGE_SIZE];
-static int g_rev_damage_patched = 0;
+static unsigned char g_rev_damage_pat[] = {0xFE, 0x8D, 0x26, 0x0E, 0x00, 0x00};
+static PatchRecord g_rev_damage_rec = {0};
+static AobCache g_rev_damage_cache = {0};
 
 void apply_reverse_damage(void) {
-    if (g_rev_damage_patched) return;
+    if (g_rev_damage_rec.active) return;
 
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    g_rev_damage_addr = base + REVERSE_DAMAGE_OFFSET;
+    if (!g_rev_damage_rec.addr) {
+        g_rev_damage_cache.pattern = g_rev_damage_pat;
+        g_rev_damage_cache.mask = "xxxxxx";
+        g_rev_damage_cache.len = 6;
+        DWORD addr = find_pattern_cached(&g_rev_damage_cache);
+        if (!addr) {
+            DWORD base = (DWORD)GetModuleHandleA(NULL);
+            addr = base + REVERSE_DAMAGE_OFFSET;
+            LOG("Reverse Damage: pattern not found, using fallback 0x%08X", addr);
+        } else {
+            LOG("Reverse Damage: signature resolved dynamically at 0x%08X", addr);
+        }
+        g_rev_damage_rec.addr = addr;
+        g_rev_damage_rec.size = REVERSE_DAMAGE_SIZE;
+    }
 
-    DWORD old;
+    /* Build patch: DEC -> INC (change byte 1: 0x8D -> 0x8C) */
+    unsigned char patch[REVERSE_DAMAGE_SIZE];
+    patch[0] = 0xFE; patch[1] = 0x8C;
+    patch[2] = 0x26; patch[3] = 0x0E;
+    patch[4] = 0x00; patch[5] = 0x00;
 
-    /* Save original bytes */
-    if (!VirtualProtect((LPVOID)g_rev_damage_addr, REVERSE_DAMAGE_SIZE, PAGE_EXECUTE_READ, &old)) {
-        LOG("Reverse Damage: cannot read target 0x%08X", g_rev_damage_addr);
+    if (!patch_apply(&g_rev_damage_rec, patch)) {
+        LOG("Reverse Damage: patch_apply FAILED at 0x%08X", g_rev_damage_rec.addr);
         return;
     }
-    memcpy(g_rev_damage_orig, (void*)g_rev_damage_addr, REVERSE_DAMAGE_SIZE);
-    VirtualProtect((LPVOID)g_rev_damage_addr, REVERSE_DAMAGE_SIZE, old, &old);
-
-    /* Patch: change 0x8D to 0x8C (DEC -> INC) */
-    unsigned char patched[REVERSE_DAMAGE_SIZE];
-    memcpy(patched, g_rev_damage_orig, REVERSE_DAMAGE_SIZE);
-    patched[1] = 0x8C;
-
-    if (!VirtualProtect((LPVOID)g_rev_damage_addr, REVERSE_DAMAGE_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        LOG("Reverse Damage: VirtualProtect FAILED at 0x%08X", g_rev_damage_addr);
-        return;
-    }
-    memcpy((void*)g_rev_damage_addr, patched, REVERSE_DAMAGE_SIZE);
-    VirtualProtect((LPVOID)g_rev_damage_addr, REVERSE_DAMAGE_SIZE, old, &old);
-    LOG("Reverse Damage: DEC->INC at 0x%08X (heal on hit)", g_rev_damage_addr);
-
-    g_rev_damage_patched = 1;
+    LOG("Reverse Damage: DEC->INC at 0x%08X (heal on hit)", g_rev_damage_rec.addr);
 }
-
 void remove_reverse_damage(void) {
-    if (!g_rev_damage_patched) return;
-
-    DWORD old;
-    if (VirtualProtect((LPVOID)g_rev_damage_addr, REVERSE_DAMAGE_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)g_rev_damage_addr, g_rev_damage_orig, REVERSE_DAMAGE_SIZE);
-        VirtualProtect((LPVOID)g_rev_damage_addr, REVERSE_DAMAGE_SIZE, old, &old);
-    }
-
-    g_rev_damage_patched = 0;
+    if (!g_rev_damage_rec.active) return;
+    patch_restore(&g_rev_damage_rec);
     LOG("Reverse Damage: unpatched");
 }
-
 
 /* ================================================================
  * One Heart Mode: patch health init values to 1.
@@ -515,79 +490,80 @@ void remove_reverse_damage(void) {
  *   Patch:    C6 86 26 0E 00 00 01  = MOV byte [ESI+0E26], 1
  * ================================================================ */
 
-static DWORD g_heart_addr4 = 0, g_heart_addr3 = 0;
-static unsigned char g_heart_orig4[HEALTH_INIT_SIZE], g_heart_orig3[HEALTH_INIT_SIZE];
-static int g_one_heart_patched = 0;
+static unsigned char g_heart4_pat[] = {0xC6, 0x86, 0x26, 0x0E, 0x00, 0x00, 0x04};
+static unsigned char g_heart3_pat[] = {0xC6, 0x86, 0x26, 0x0E, 0x00, 0x00, 0x03};
+static PatchRecord g_heart_rec4 = {0};
+static PatchRecord g_heart_rec3 = {0};
+static AobCache g_heart4_cache = {0};
+static AobCache g_heart3_cache = {0};
 
 void apply_one_heart(void) {
-    if (g_one_heart_patched) return;
+    if (g_heart_rec4.active && g_heart_rec3.active) return;
 
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    g_heart_addr4 = base + HEALTH_INIT_4_OFFSET;
-    g_heart_addr3 = base + HEALTH_INIT_3_OFFSET;
-
-    DWORD old;
-
-    /* Save originals */
-    if (!VirtualProtect((LPVOID)g_heart_addr4, HEALTH_INIT_SIZE, PAGE_EXECUTE_READ, &old)) {
-        LOG("One Heart: cannot read init4 target 0x%08X", g_heart_addr4);
-        return;
+    /* Resolve init4 address */
+    if (!g_heart_rec4.addr) {
+        g_heart4_cache.pattern = g_heart4_pat;
+        g_heart4_cache.mask = "xxxxxxx";
+        g_heart4_cache.len = 7;
+        DWORD addr = find_pattern_cached(&g_heart4_cache);
+        if (!addr) {
+            DWORD base = (DWORD)GetModuleHandleA(NULL);
+            addr = base + HEALTH_INIT_4_OFFSET;
+            LOG("One Heart: init4 pattern not found, using fallback 0x%08X", addr);
+        } else {
+            LOG("One Heart: init4 signature resolved dynamically at 0x%08X", addr);
+        }
+        g_heart_rec4.addr = addr;
+        g_heart_rec4.size = HEALTH_INIT_SIZE;
     }
-    memcpy(g_heart_orig4, (void*)g_heart_addr4, HEALTH_INIT_SIZE);
-    VirtualProtect((LPVOID)g_heart_addr4, HEALTH_INIT_SIZE, old, &old);
 
-    if (!VirtualProtect((LPVOID)g_heart_addr3, HEALTH_INIT_SIZE, PAGE_EXECUTE_READ, &old)) {
-        LOG("One Heart: cannot read init3 target 0x%08X", g_heart_addr3);
-        return;
+    /* Resolve init3 address */
+    if (!g_heart_rec3.addr) {
+        g_heart3_cache.pattern = g_heart3_pat;
+        g_heart3_cache.mask = "xxxxxxx";
+        g_heart3_cache.len = 7;
+        DWORD addr = find_pattern_cached(&g_heart3_cache);
+        if (!addr) {
+            DWORD base = (DWORD)GetModuleHandleA(NULL);
+            addr = base + HEALTH_INIT_3_OFFSET;
+            LOG("One Heart: init3 pattern not found, using fallback 0x%08X", addr);
+        } else {
+            LOG("One Heart: init3 signature resolved dynamically at 0x%08X", addr);
+        }
+        g_heart_rec3.addr = addr;
+        g_heart_rec3.size = HEALTH_INIT_SIZE;
     }
-    memcpy(g_heart_orig3, (void*)g_heart_addr3, HEALTH_INIT_SIZE);
-    VirtualProtect((LPVOID)g_heart_addr3, HEALTH_INIT_SIZE, old, &old);
 
-    /* Patch init4: 04 -> 01 */
+    /* Patch init4: change byte 6 from 0x04 to 0x01 */
     unsigned char p4[HEALTH_INIT_SIZE];
-    memcpy(p4, g_heart_orig4, HEALTH_INIT_SIZE);
+    memcpy(p4, g_heart4_pat, HEALTH_INIT_SIZE);
     p4[6] = 0x01;
-
-    if (!VirtualProtect((LPVOID)g_heart_addr4, HEALTH_INIT_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        LOG("One Heart: VirtualProtect FAILED at 0x%08X", g_heart_addr4);
+    if (!patch_apply(&g_heart_rec4, p4)) {
+        LOG("One Heart: failed to patch init4 at 0x%08X", g_heart_rec4.addr);
         return;
     }
-    memcpy((void*)g_heart_addr4, p4, HEALTH_INIT_SIZE);
-    VirtualProtect((LPVOID)g_heart_addr4, HEALTH_INIT_SIZE, old, &old);
 
-    /* Patch init3: 03 -> 01 */
+    /* Patch init3: change byte 6 from 0x03 to 0x01 */
     unsigned char p3[HEALTH_INIT_SIZE];
-    memcpy(p3, g_heart_orig3, HEALTH_INIT_SIZE);
+    memcpy(p3, g_heart3_pat, HEALTH_INIT_SIZE);
     p3[6] = 0x01;
-
-    if (!VirtualProtect((LPVOID)g_heart_addr3, HEALTH_INIT_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        LOG("One Heart: VirtualProtect FAILED at 0x%08X", g_heart_addr3);
+    if (!patch_apply(&g_heart_rec3, p3)) {
+        patch_restore(&g_heart_rec4);
+        LOG("One Heart: failed to patch init3 at 0x%08X, init4 rolled back", g_heart_rec3.addr);
         return;
     }
-    memcpy((void*)g_heart_addr3, p3, HEALTH_INIT_SIZE);
-    VirtualProtect((LPVOID)g_heart_addr3, HEALTH_INIT_SIZE, old, &old);
 
-    g_one_heart_patched = 1;
-    LOG("One Heart: patched init4 (0x%08X) and init3 (0x%08X) to 1 HP", g_heart_addr4, g_heart_addr3);
+    LOG("One Heart: patched init4 (0x%08X) and init3 (0x%08X) to 1 HP",
+        g_heart_rec4.addr, g_heart_rec3.addr);
 }
-
 void remove_one_heart(void) {
-    if (!g_one_heart_patched) return;
-
-    DWORD old;
-    if (VirtualProtect((LPVOID)g_heart_addr4, HEALTH_INIT_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)g_heart_addr4, g_heart_orig4, HEALTH_INIT_SIZE);
-        VirtualProtect((LPVOID)g_heart_addr4, HEALTH_INIT_SIZE, old, &old);
-    }
-    if (VirtualProtect((LPVOID)g_heart_addr3, HEALTH_INIT_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)g_heart_addr3, g_heart_orig3, HEALTH_INIT_SIZE);
-        VirtualProtect((LPVOID)g_heart_addr3, HEALTH_INIT_SIZE, old, &old);
-    }
-
-    g_one_heart_patched = 0;
-    LOG("One Heart: unpatched");
+    int had4 = g_heart_rec4.active;
+    int had3 = g_heart_rec3.active;
+    if (had3) patch_restore(&g_heart_rec3);
+    if (had4) patch_restore(&g_heart_rec4);
+    if (had4 || had3)
+        LOG("One Heart: unpatched");
 }
-
 
 /* ================================================================
  * No Knockback: NOP the CALL to Knockback within TakeDamage.
@@ -597,50 +573,42 @@ void remove_one_heart(void) {
  *   Patch:    90 90 90 90 90  = NOP x5
  * ================================================================ */
 
-static DWORD g_knockback_addr = 0;
-static unsigned char g_knockback_orig[KNOCKBACK_CALL_SIZE];
-static int g_knockback_patched = 0;
+static unsigned char g_knockback_pat[] = {0xE8, 0xBC, 0x95, 0xFF, 0xFF};
+static PatchRecord g_knockback_rec = {0};
+static AobCache g_knockback_cache = {0};
 
 void apply_no_knockback(void) {
-    if (g_knockback_patched) return;
+    if (g_knockback_rec.active) return;
 
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    g_knockback_addr = base + KNOCKBACK_CALL_OFFSET;
+    if (!g_knockback_rec.addr) {
+        g_knockback_cache.pattern = g_knockback_pat;
+        g_knockback_cache.mask = "xxxxx";
+        g_knockback_cache.len = 5;
+        DWORD addr = find_pattern_cached(&g_knockback_cache);
+        if (!addr) {
+            DWORD base = (DWORD)GetModuleHandleA(NULL);
+            addr = base + KNOCKBACK_CALL_OFFSET;
+            LOG("No Knockback: pattern not found, using fallback 0x%08X", addr);
+        } else {
+            LOG("No Knockback: signature resolved dynamically at 0x%08X", addr);
+        }
+        g_knockback_rec.addr = addr;
+        g_knockback_rec.size = KNOCKBACK_CALL_SIZE;
+    }
 
-    DWORD old;
-
-    if (!VirtualProtect((LPVOID)g_knockback_addr, KNOCKBACK_CALL_SIZE, PAGE_EXECUTE_READ, &old)) {
-        LOG("No Knockback: cannot read target 0x%08X", g_knockback_addr);
+    unsigned char nops[KNOCKBACK_CALL_SIZE];
+    memset(nops, 0x90, KNOCKBACK_CALL_SIZE);
+    if (!patch_apply(&g_knockback_rec, nops)) {
+        LOG("No Knockback: patch_apply FAILED at 0x%08X", g_knockback_rec.addr);
         return;
     }
-    memcpy(g_knockback_orig, (void*)g_knockback_addr, KNOCKBACK_CALL_SIZE);
-    VirtualProtect((LPVOID)g_knockback_addr, KNOCKBACK_CALL_SIZE, old, &old);
-
-    unsigned char nops[5] = {0x90, 0x90, 0x90, 0x90, 0x90};
-    if (!VirtualProtect((LPVOID)g_knockback_addr, KNOCKBACK_CALL_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        LOG("No Knockback: VirtualProtect FAILED at 0x%08X", g_knockback_addr);
-        return;
-    }
-    memcpy((void*)g_knockback_addr, nops, KNOCKBACK_CALL_SIZE);
-    VirtualProtect((LPVOID)g_knockback_addr, KNOCKBACK_CALL_SIZE, old, &old);
-
-    g_knockback_patched = 1;
-    LOG("No Knockback: NOP'd CALL at 0x%08X", g_knockback_addr);
+    LOG("No Knockback: NOP'd CALL at 0x%08X", g_knockback_rec.addr);
 }
-
 void remove_no_knockback(void) {
-    if (!g_knockback_patched) return;
-
-    DWORD old;
-    if (VirtualProtect((LPVOID)g_knockback_addr, KNOCKBACK_CALL_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)g_knockback_addr, g_knockback_orig, KNOCKBACK_CALL_SIZE);
-        VirtualProtect((LPVOID)g_knockback_addr, KNOCKBACK_CALL_SIZE, old, &old);
-    }
-
-    g_knockback_patched = 0;
+    if (!g_knockback_rec.active) return;
+    patch_restore(&g_knockback_rec);
     LOG("No Knockback: unpatched");
 }
-
 
 /* ================================================================
  * No Hit Reactions: NOP the CALL to HitReaction7.
@@ -650,50 +618,42 @@ void remove_no_knockback(void) {
  *   Patch:    90 90 90 90 90  = NOP x5
  * ================================================================ */
 
-static DWORD g_hitreact_addr = 0;
-static unsigned char g_hitreact_orig[HITREACT_CALL_SIZE];
-static int g_hitreact_patched = 0;
+static unsigned char g_hitreact_pat[] = {0xE8, 0x46, 0xC8, 0xFF, 0xFF};
+static PatchRecord g_hitreact_rec = {0};
+static AobCache g_hitreact_cache = {0};
 
 void apply_no_hit_reaction(void) {
-    if (g_hitreact_patched) return;
+    if (g_hitreact_rec.active) return;
 
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    g_hitreact_addr = base + HITREACT_CALL_OFFSET;
+    if (!g_hitreact_rec.addr) {
+        g_hitreact_cache.pattern = g_hitreact_pat;
+        g_hitreact_cache.mask = "xxxxx";
+        g_hitreact_cache.len = 5;
+        DWORD addr = find_pattern_cached(&g_hitreact_cache);
+        if (!addr) {
+            DWORD base = (DWORD)GetModuleHandleA(NULL);
+            addr = base + HITREACT_CALL_OFFSET;
+            LOG("No Hit Reaction: pattern not found, using fallback 0x%08X", addr);
+        } else {
+            LOG("No Hit Reaction: signature resolved dynamically at 0x%08X", addr);
+        }
+        g_hitreact_rec.addr = addr;
+        g_hitreact_rec.size = HITREACT_CALL_SIZE;
+    }
 
-    DWORD old;
-
-    if (!VirtualProtect((LPVOID)g_hitreact_addr, HITREACT_CALL_SIZE, PAGE_EXECUTE_READ, &old)) {
-        LOG("No Hit Reaction: cannot read target 0x%08X", g_hitreact_addr);
+    unsigned char nops[HITREACT_CALL_SIZE];
+    memset(nops, 0x90, HITREACT_CALL_SIZE);
+    if (!patch_apply(&g_hitreact_rec, nops)) {
+        LOG("No Hit Reaction: patch_apply FAILED at 0x%08X", g_hitreact_rec.addr);
         return;
     }
-    memcpy(g_hitreact_orig, (void*)g_hitreact_addr, HITREACT_CALL_SIZE);
-    VirtualProtect((LPVOID)g_hitreact_addr, HITREACT_CALL_SIZE, old, &old);
-
-    unsigned char nops[5] = {0x90, 0x90, 0x90, 0x90, 0x90};
-    if (!VirtualProtect((LPVOID)g_hitreact_addr, HITREACT_CALL_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        LOG("No Hit Reaction: VirtualProtect FAILED at 0x%08X", g_hitreact_addr);
-        return;
-    }
-    memcpy((void*)g_hitreact_addr, nops, HITREACT_CALL_SIZE);
-    VirtualProtect((LPVOID)g_hitreact_addr, HITREACT_CALL_SIZE, old, &old);
-
-    g_hitreact_patched = 1;
-    LOG("No Hit Reaction: NOP'd CALL at 0x%08X", g_hitreact_addr);
+    LOG("No Hit Reaction: NOP'd CALL at 0x%08X", g_hitreact_rec.addr);
 }
-
 void remove_no_hit_reaction(void) {
-    if (!g_hitreact_patched) return;
-
-    DWORD old;
-    if (VirtualProtect((LPVOID)g_hitreact_addr, HITREACT_CALL_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)g_hitreact_addr, g_hitreact_orig, HITREACT_CALL_SIZE);
-        VirtualProtect((LPVOID)g_hitreact_addr, HITREACT_CALL_SIZE, old, &old);
-    }
-
-    g_hitreact_patched = 0;
+    if (!g_hitreact_rec.active) return;
+    patch_restore(&g_hitreact_rec);
     LOG("No Hit Reaction: unpatched");
 }
-
 
 /* ================================================================
  * Damage Response Only: NOP the DEC (no damage taken) but leave
@@ -706,50 +666,42 @@ void remove_no_hit_reaction(void) {
  * same address. Only enable one at a time.
  * ================================================================ */
 
-static DWORD g_dmgresp_addr = 0;
-static unsigned char g_dmgresp_orig[DAMAGE_PATCH_SIZE];
-static int g_dmgresp_patched = 0;
+static unsigned char g_dmgresp_pat[] = {0xFE, 0x8D, 0x26, 0x0E, 0x00, 0x00};
+static PatchRecord g_dmgresp_rec = {0};
+static AobCache g_dmgresp_cache = {0};
 
 void apply_damage_response_only(void) {
-    if (g_dmgresp_patched) return;
+    if (g_dmgresp_rec.active) return;
 
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    g_dmgresp_addr = base + DAMAGE_PATCH_OFFSET;
+    if (!g_dmgresp_rec.addr) {
+        g_dmgresp_cache.pattern = g_dmgresp_pat;
+        g_dmgresp_cache.mask = "xxxxxx";
+        g_dmgresp_cache.len = 6;
+        DWORD addr = find_pattern_cached(&g_dmgresp_cache);
+        if (!addr) {
+            DWORD base = (DWORD)GetModuleHandleA(NULL);
+            addr = base + DAMAGE_PATCH_OFFSET;
+            LOG("Damage Response: pattern not found, using fallback 0x%08X", addr);
+        } else {
+            LOG("Damage Response: signature resolved dynamically at 0x%08X", addr);
+        }
+        g_dmgresp_rec.addr = addr;
+        g_dmgresp_rec.size = DAMAGE_PATCH_SIZE;
+    }
 
-    DWORD old;
-
-    if (!VirtualProtect((LPVOID)g_dmgresp_addr, DAMAGE_PATCH_SIZE, PAGE_EXECUTE_READ, &old)) {
-        LOG("Damage Response: cannot read target 0x%08X", g_dmgresp_addr);
+    unsigned char nops[DAMAGE_PATCH_SIZE];
+    memset(nops, 0x90, DAMAGE_PATCH_SIZE);
+    if (!patch_apply(&g_dmgresp_rec, nops)) {
+        LOG("Damage Response: patch_apply FAILED at 0x%08X", g_dmgresp_rec.addr);
         return;
     }
-    memcpy(g_dmgresp_orig, (void*)g_dmgresp_addr, DAMAGE_PATCH_SIZE);
-    VirtualProtect((LPVOID)g_dmgresp_addr, DAMAGE_PATCH_SIZE, old, &old);
-
-    unsigned char nops[6] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
-    if (!VirtualProtect((LPVOID)g_dmgresp_addr, DAMAGE_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        LOG("Damage Response: VirtualProtect FAILED at 0x%08X", g_dmgresp_addr);
-        return;
-    }
-    memcpy((void*)g_dmgresp_addr, nops, DAMAGE_PATCH_SIZE);
-    VirtualProtect((LPVOID)g_dmgresp_addr, DAMAGE_PATCH_SIZE, old, &old);
-
-    g_dmgresp_patched = 1;
-    LOG("Damage Response Only: NOP'd DEC at 0x%08X (no damage, FX still play)", g_dmgresp_addr);
+    LOG("Damage Response Only: NOP'd DEC at 0x%08X (no damage, FX still play)", g_dmgresp_rec.addr);
 }
-
 void remove_damage_response_only(void) {
-    if (!g_dmgresp_patched) return;
-
-    DWORD old;
-    if (VirtualProtect((LPVOID)g_dmgresp_addr, DAMAGE_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)g_dmgresp_addr, g_dmgresp_orig, DAMAGE_PATCH_SIZE);
-        VirtualProtect((LPVOID)g_dmgresp_addr, DAMAGE_PATCH_SIZE, old, &old);
-    }
-
-    g_dmgresp_patched = 0;
+    if (!g_dmgresp_rec.active) return;
+    patch_restore(&g_dmgresp_rec);
     LOG("Damage Response Only: unpatched");
 }
-
 
 /* ================================================================
  * One-Hit-Kill: One Heart Mode + NOP Death Health Reset.
@@ -758,87 +710,151 @@ void remove_damage_response_only(void) {
  * NOPing the death reset prevents health from being restored to 1.
  * ================================================================ */
 
-static DWORD g_ohk_death_addr = 0;
-static unsigned char g_ohk_death_orig[DEATH_PATCH_SIZE];
-static int g_ohk_death_patched = 0;
+static unsigned char g_ohk_death_pat[] = {0x88, 0x8E, 0x26, 0x0E, 0x00, 0x00};
+static PatchRecord g_ohk_death_rec = {0};
+static AobCache g_ohk_death_cache = {0};
 
 void apply_one_hit_kill(void) {
     apply_one_heart();
 
-    if (g_ohk_death_patched) return;
+    if (g_ohk_death_rec.active) return;
 
-    DWORD base = (DWORD)GetModuleHandleA(NULL);
-    g_ohk_death_addr = base + DEATH_PATCH_OFFSET;
+    if (!g_ohk_death_rec.addr) {
+        g_ohk_death_cache.pattern = g_ohk_death_pat;
+        g_ohk_death_cache.mask = "xxxxxx";
+        g_ohk_death_cache.len = 6;
+        DWORD addr = find_pattern_cached(&g_ohk_death_cache);
+        if (!addr) {
+            DWORD base = (DWORD)GetModuleHandleA(NULL);
+            addr = base + DEATH_PATCH_OFFSET;
+            LOG("One-Hit-Kill: death pattern not found, using fallback 0x%08X", addr);
+        } else {
+            LOG("One-Hit-Kill: death signature resolved dynamically at 0x%08X", addr);
+        }
+        g_ohk_death_rec.addr = addr;
+        g_ohk_death_rec.size = DEATH_PATCH_SIZE;
+    }
 
-    DWORD old;
-
-    /* Save original death bytes */
-    if (!VirtualProtect((LPVOID)g_ohk_death_addr, DEATH_PATCH_SIZE, PAGE_EXECUTE_READ, &old)) {
-        LOG("One-Hit-Kill: cannot read death target 0x%08X", g_ohk_death_addr);
+    unsigned char nops[DEATH_PATCH_SIZE];
+    memset(nops, 0x90, DEATH_PATCH_SIZE);
+    if (!patch_apply(&g_ohk_death_rec, nops)) {
+        LOG("One-Hit-Kill: patch_apply FAILED for death at 0x%08X", g_ohk_death_rec.addr);
         return;
     }
-    memcpy(g_ohk_death_orig, (void*)g_ohk_death_addr, DEATH_PATCH_SIZE);
-    VirtualProtect((LPVOID)g_ohk_death_addr, DEATH_PATCH_SIZE, old, &old);
-
-    /* NOP the death reset */
-    unsigned char nops[6] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
-    if (!VirtualProtect((LPVOID)g_ohk_death_addr, DEATH_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        LOG("One-Hit-Kill: VirtualProtect FAILED for death at 0x%08X", g_ohk_death_addr);
-        return;
-    }
-    memcpy((void*)g_ohk_death_addr, nops, DEATH_PATCH_SIZE);
-    VirtualProtect((LPVOID)g_ohk_death_addr, DEATH_PATCH_SIZE, old, &old);
-
-    g_ohk_death_patched = 1;
-    LOG("One-Hit-Kill: NOP'd death reset at 0x%08X", g_ohk_death_addr);
+    LOG("One-Hit-Kill: NOP'd death reset at 0x%08X", g_ohk_death_rec.addr);
 }
-
 void remove_one_hit_kill(void) {
     remove_one_heart();
 
-    if (!g_ohk_death_patched) return;
-
-    DWORD old;
-    if (VirtualProtect((LPVOID)g_ohk_death_addr, DEATH_PATCH_SIZE, PAGE_EXECUTE_READWRITE, &old)) {
-        memcpy((void*)g_ohk_death_addr, g_ohk_death_orig, DEATH_PATCH_SIZE);
-        VirtualProtect((LPVOID)g_ohk_death_addr, DEATH_PATCH_SIZE, old, &old);
-    }
-
-    g_ohk_death_patched = 0;
+    if (!g_ohk_death_rec.active) return;
+    patch_restore(&g_ohk_death_rec);
     LOG("One-Hit-Kill: death reset restored");
 }
 
-
 void update_cheats(void) {
-    static int prev_time_freeze = 0;
+    static CheatsState g_prev = {0};
+
+    /* Dirty flag: skip patch apply/remove unless state changed.
+     * Force-writes (custom studs, golden bricks) still run every frame. */
+    if (memcmp(&g_cheats, &g_prev, sizeof(CheatsState)) == 0) {
+        force_custom_studs();
+        force_golden_bricks();
+        return;
+    }
+
+    /* Detect rising edges for one-shot actions */
+    int time_freeze_rising = g_cheats.time_freeze && !g_prev.time_freeze;
+
+    g_prev = g_cheats;
+
+    /* Core toggles (non-damage) */
     if (g_cheats.infinite_studs) apply_stud_patch(); else remove_stud_patch();
-    if (g_cheats.invincible) apply_health_patch(); else remove_health_patch();
-    if (g_cheats.underwater_breath) apply_breath_patch(); else remove_breath_patch();
     if (g_cheats.super_speed) apply_super_speed(); else remove_super_speed();
     if (g_cheats.super_jump) apply_super_jump(); else remove_super_jump();
     if (g_cheats.char_scale) apply_char_scale(); else remove_char_scale();
+    if (g_cheats.underwater_breath) apply_breath_patch(); else remove_breath_patch();
+
+    /* Update scale/gravity multipliers when already patched */
     if (g_gravity_patched)
         g_gravity_mult = (float)g_cheats.super_jump_scale / 10.0f;
     if (g_scale_patched)
         g_scale_val = (float)g_cheats.char_scale_val / 100.0f;
 
-    /* Damage system mods */
-    if (g_cheats.reverse_damage) apply_reverse_damage(); else remove_reverse_damage();
-    if (g_cheats.one_heart) apply_one_heart(); else remove_one_heart();
+    /* ================================================================
+     * DAMAGE SYSTEM - Mutual Exclusion Rules
+     *
+     * DAMAGE_PATCH_OFFSET  (DEC [reg+0xE26]): shared by 3 cheats
+     *   Priority: Invincibility > Damage Response Only > Reverse Damage
+     *   (Only one can be active at a time - they patch the same address)
+     *
+     * DEATH_PATCH_OFFSET   (MOV [reg+0xE26], CL): shared by 2 cheats
+     *   Priority: Invincibility > One-Hit-Kill
+     *
+     * Combo: One-Hit-Kill = One Heart + Death NOP
+     *   (One Heart is always applied as part of OHK)
+     * ================================================================ */
+
+    if (g_cheats.invincible) {
+        /* Highest priority: patches both damage + death addresses */
+        apply_health_patch();
+        remove_damage_response_only();
+        remove_reverse_damage();
+        remove_one_hit_kill();
+        if (g_cheats.damage_response_only || g_cheats.reverse_damage || g_cheats.one_hit_kill)
+            LOG("Damage: invincible active - suppressed conflicting cheat(s)");
+    } else if (g_cheats.one_hit_kill) {
+        /* Second priority: patches death address */
+        apply_one_hit_kill();
+        remove_health_patch();
+        remove_damage_response_only();
+        remove_reverse_damage();
+        if (g_cheats.damage_response_only || g_cheats.reverse_damage)
+            LOG("Damage: one_hit_kill active - suppressed conflicting cheat(s)");
+    } else if (g_cheats.damage_response_only) {
+        /* Third priority: patches damage address only */
+        apply_damage_response_only();
+        remove_health_patch();
+        remove_reverse_damage();
+        remove_one_hit_kill();
+        if (g_cheats.reverse_damage)
+            LOG("Damage: damage_response_only active - suppressed conflicting cheat(s)");
+    } else if (g_cheats.reverse_damage) {
+        /* Lowest priority on damage address */
+        apply_reverse_damage();
+        remove_health_patch();
+        remove_damage_response_only();
+        remove_one_hit_kill();
+    } else {
+        /* No conflicting damage mods - ensure all clean */
+        remove_health_patch();
+        remove_damage_response_only();
+        remove_reverse_damage();
+        remove_one_hit_kill();
+    }
+
+    /* Independent damage cheats (unique addresses - no conflicts) */
+    if (g_cheats.one_heart) {
+        apply_one_heart();
+    } else {
+        remove_one_heart();
+    }
     if (g_cheats.no_knockback) apply_no_knockback(); else remove_no_knockback();
     if (g_cheats.no_hit_reaction) apply_no_hit_reaction(); else remove_no_hit_reaction();
-    if (g_cheats.damage_response_only) apply_damage_response_only(); else remove_damage_response_only();
-    if (g_cheats.one_hit_kill) apply_one_hit_kill(); else remove_one_hit_kill();
 
-    if (g_cheats.time_freeze && !prev_time_freeze) {
+    /* Other systems */
+    if (g_cheats.infinite_ammo) infinite_ammo_apply(); else infinite_ammo_remove();
+    if (g_cheats.noclip) noclip_apply(); else noclip_remove();
+
+    if (time_freeze_rising) {
         time_freeze_snapshot();
         LOG("Time Freeze ON");
     }
-    prev_time_freeze = g_cheats.time_freeze;
 
     force_custom_studs();
     force_golden_bricks();
+    if (g_cheats.stud_magnet) stud_magnet_apply(); else stud_magnet_remove();
     water_set_enabled(g_cheats.remove_water);
+    if (g_cheats.score_mult) score_mult_apply(); else score_mult_remove();
     if (g_cheats.show_debug) {
         scan_entities();
     }

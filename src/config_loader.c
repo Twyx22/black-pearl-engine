@@ -1,14 +1,38 @@
 #include "config_loader.h"
 #include "cheats.h"
+#include "favorites.h"
+#include "hotkeys.h"
 #include "utils.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
+/* ================================================================
+ * Config V2 — Section-based INI format with auto-migration
+ *
+ * New format:
+ *   [Cheats]
+ *   invincible=1
+ *   infinite_studs=0
+ *   ...
+ *
+ *   [Favorites]
+ *   favorite_0=2,5    (tab, item)
+ *   ...
+ *
+ *   [Hotkeys]
+ *   hotkey_0=0x46,3,1  (vk, tab, item)
+ *   ...
+ *
+ * Old format (flat) is auto-detected and migrated on first write.
+ * ================================================================ */
+
 typedef struct {
     const char *name;
     int *field;
 } ConfigMapping;
+
+#define MIGRATION_MARKER "# bpe_cfg_v2"
 
 static ConfigMapping g_map[] = {
     {"infinite_studs",      &g_cheats.infinite_studs},
@@ -38,6 +62,21 @@ static ConfigMapping g_map[] = {
     {"no_hit_reaction",      &g_cheats.no_hit_reaction},
     {"damage_response_only", &g_cheats.damage_response_only},
     {"one_hit_kill",         &g_cheats.one_hit_kill},
+    {"infinite_ammo",        &g_cheats.infinite_ammo},
+    {"stud_magnet",          &g_cheats.stud_magnet},
+    /* New v5 fields */
+    {"quick_combo",          &g_cheats.quick_combo},
+    {"super_punch",          &g_cheats.super_punch},
+    {"always_gold",          &g_cheats.always_gold},
+    {"mega_destruct",        &g_cheats.mega_destruct},
+    {"infinite_cannonballs", &g_cheats.infinite_cannonballs},
+    {"free_camera",          &g_cheats.free_camera},
+    {"fov",                  &g_cheats.fov},
+    {"teleport_slot_0",      &g_cheats.teleport_slot_0},
+    {"teleport_slot_1",      &g_cheats.teleport_slot_1},
+    {"teleport_slot_2",      &g_cheats.teleport_slot_2},
+    {"teleport_slot_3",      &g_cheats.teleport_slot_3},
+    {"teleport_slot_4",      &g_cheats.teleport_slot_4},
 };
 
 #define MAP_COUNT (sizeof(g_map) / sizeof(g_map[0]))
@@ -50,6 +89,62 @@ static ConfigMapping *find_mapping(const char *name) {
     return NULL;
 }
 
+/* -----------------------------------------------------------------
+ * Check if the config file is already V2 format (contains section headers)
+ * ----------------------------------------------------------------- */
+static int is_v2_format(FILE *f) {
+    char line[256];
+    long pos = ftell(f);
+    while (fgets(line, sizeof(line), f)) {
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '[') {
+            fseek(f, pos, SEEK_SET);
+            return 1;
+        }
+        if (*p == '#' && strstr(p, MIGRATION_MARKER)) {
+            fseek(f, pos, SEEK_SET);
+            return 1;
+        }
+    }
+    fseek(f, pos, SEEK_SET);
+    return 0;
+}
+
+/* -----------------------------------------------------------------
+ * Parse a key=value line (handles whitespace trimming)
+ * ----------------------------------------------------------------- */
+static int parse_kv_line(const char *line, char *name, int name_sz, int *value) {
+    const char *p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p == '#' || *p == ';' || *p == '\n' || *p == '\r' || *p == '\0')
+        return 0;
+    if (*p == '[') return 0;  /* Section header — skip */
+
+    const char *eq = strchr(p, '=');
+    if (!eq) return 0;
+
+    /* Extract name */
+    int nlen = (int)(eq - p);
+    if (nlen >= name_sz) nlen = name_sz - 1;
+    memcpy(name, p, nlen);
+    name[nlen] = '\0';
+
+    /* Trim trailing whitespace from name */
+    char *end = name + nlen - 1;
+    while (end >= name && (*end == ' ' || *end == '\t')) *end-- = '\0';
+
+    /* Parse value */
+    const char *v = eq + 1;
+    while (*v == ' ' || *v == '\t') v++;
+    *value = atoi(v);
+
+    return 1;
+}
+
+/* -----------------------------------------------------------------
+ * Load config — supports V2 section-based format and auto-migrates old
+ * ----------------------------------------------------------------- */
 void load_config(void) {
     FILE *f = fopen(CONFIG_FILE, "r");
     if (!f) {
@@ -57,37 +152,82 @@ void load_config(void) {
         return;
     }
 
+    int is_v2 = is_v2_format(f);
     char line[256];
     int loaded = 0;
+    int in_cheats_section = 1;  /* V1 has no sections */
+
     while (fgets(line, sizeof(line), f)) {
-        char *p = line;
-        while (*p == ' ' || *p == '\t') p++;
-        if (*p == '#' || *p == ';' || *p == '\n' || *p == '\r' || *p == '\0')
+        /* Detect section headers (V2 only) */
+        if (line[0] == '[') {
+            if (is_v2) {
+                in_cheats_section = (_strnicmp(line, "[Cheats]", 8) == 0) ? 1 : 0;
+                /* Future: handle [Favorites] and [Hotkeys] sections */
+                if (_strnicmp(line, "[Favorites]", 11) == 0) {
+                    /* Read favorites */
+                    while (fgets(line, sizeof(line), f)) {
+                        char *p = line;
+                        while (*p == ' ' || *p == '\t') p++;
+                        if (*p == '[' || *p == '\0' || *p == '\n') break;
+                        if (*p == '#' || *p == ';') continue;
+
+                        int tab = -1, item = -1;
+                        if (sscanf(p, "favorite_%*d=%d,%d", &tab, &item) >= 2) {
+                            if (tab >= 0 && item >= 0)
+                                favorites_deserialize_add(tab, item);
+                        }
+                    }
+                }
+                if (_strnicmp(line, "[Hotkeys]", 9) == 0) {
+                    /* Read hotkeys */
+                    while (fgets(line, sizeof(line), f)) {
+                        char *p = line;
+                        while (*p == ' ' || *p == '\t') p++;
+                        if (*p == '[' || *p == '\0' || *p == '\n') break;
+                        if (*p == '#' || *p == ';') continue;
+
+                        int vk = 0, tab = 0, item = 0;
+                        if (sscanf(p, "hotkey_%*d=0x%x,%d,%d", &vk, &tab, &item) >= 3) {
+                            if (vk > 0 && tab >= 0 && item >= 0)
+                                hotkeys_bind(vk, tab, item);
+                        } else if (sscanf(p, "hotkey_%*d=%d,%d,%d", &vk, &tab, &item) >= 3) {
+                            if (vk > 0 && tab >= 0 && item >= 0)
+                                hotkeys_bind(vk, tab, item);
+                        }
+                    }
+                }
+            }
             continue;
-        if (*p == '[') continue;
+        }
 
-        char *eq = strchr(p, '=');
-        if (!eq) continue;
-        *eq = '\0';
-        char *name = p;
-        char *val_str = eq + 1;
+        if (!in_cheats_section && is_v2) continue;
 
-        while (name < eq && (*(eq - 1) == ' ' || *(eq - 1) == '\t')) *(eq - 1) = '\0', eq--;
-        while (*val_str == ' ' || *val_str == '\t') val_str++;
-        char *end = val_str + strlen(val_str) - 1;
-        while (end >= val_str && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r'))
-            *end-- = '\0';
+        char name[64];
+        int value;
+        if (!parse_kv_line(line, name, sizeof(name), &value))
+            continue;
 
         ConfigMapping *m = find_mapping(name);
         if (m) {
-            *m->field = atoi(val_str);
+            *m->field = value;
             loaded++;
         }
     }
     fclose(f);
-    LOG("Config: loaded %d settings from %s", loaded, CONFIG_FILE);
+
+    LOG("Config: loaded %d settings from %s (v%d format)", loaded, CONFIG_FILE, is_v2 ? 2 : 1);
+
+    /* Migrate old format: write V2 on next save */
+    if (!is_v2 && loaded > 0) {
+        LOG("Config: migrating old format to V2 on next save");
+    }
+
+    /* Initialise F3 key state tracking (defined in menu.c) */
 }
 
+/* -----------------------------------------------------------------
+ * Save config in V2 section-based format
+ * ----------------------------------------------------------------- */
 void save_config(void) {
     FILE *f = fopen(CONFIG_FILE, "w");
     if (!f) {
@@ -95,13 +235,49 @@ void save_config(void) {
         return;
     }
 
-    fprintf(f, "# Black Pearl Engine config\n");
+    fprintf(f, "# " MIGRATION_MARKER "\n");
+    fprintf(f, "# Black Pearl Engine config v2\n");
     fprintf(f, "# Generated automatically. Edit and restart to apply.\n\n");
 
+    /* --- [Cheats] section --- */
+    fprintf(f, "[Cheats]\n");
     for (int i = 0; i < MAP_COUNT; i++) {
         fprintf(f, "%s=%d\n", g_map[i].name, *g_map[i].field);
     }
+    fprintf(f, "\n");
+
+    /* --- [Favorites] section --- */
+    int fcount = favorites_count();
+    if (fcount > 0) {
+        fprintf(f, "[Favorites]\n");
+        for (int i = 0; i < fcount; i++) {
+            const FavoriteEntry *fe = favorites_get(i);
+            if (fe)
+                fprintf(f, "favorite_%d=%d,%d\n", i, fe->tab, fe->item);
+        }
+        fprintf(f, "\n");
+    }
+
+    /* --- [Hotkeys] section --- */
+    int hk_count = 0;
+    for (int i = 0; i < HOTKEYS_MAX; i++) {
+        if (g_hotkeys[i].active) hk_count++;
+    }
+    if (hk_count > 0) {
+        fprintf(f, "[Hotkeys]\n");
+        int idx = 0;
+        for (int i = 0; i < HOTKEYS_MAX; i++) {
+            if (g_hotkeys[i].active) {
+                fprintf(f, "hotkey_%d=0x%x,%d,%d\n", idx++,
+                        g_hotkeys[i].vk,
+                        g_hotkeys[i].tab,
+                        g_hotkeys[i].item);
+            }
+        }
+        fprintf(f, "\n");
+    }
 
     fclose(f);
-    LOG("Config: saved %d settings to %s", MAP_COUNT, CONFIG_FILE);
+    LOG("Config: saved %d settings, %d favorites, %d hotkeys to %s",
+        MAP_COUNT, fcount, hk_count, CONFIG_FILE);
 }
