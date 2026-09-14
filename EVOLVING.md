@@ -10,3 +10,7 @@
 [2026-06-28] @code-builder ImGui Checkbox: int* → bool* API Change — `ImGui::Checkbox()` now takes `bool*` as second argument (was `int*` in older versions). Fix: change backing storage type from `int` to `bool`, and use `true`/`false` instead of `1`/`0`. Impact: MEDIUM — affects toggles and freeze slots in memory browsers.
 
 [2026-06-28] @code-builder MinGW Cross-Compile: Missing Source Files in Makefile — When adding new cheat modules, two patterns consistently cause linker errors: (1) commenting out `SRCS += src/noclip.c` and `SRCS += src/memory_browser.c` but having `cheats.c` and `menu.c` reference their functions, (2) missing Windows libraries for new API calls (e.g., `CoTaskMemFree` requires `-lole32`). Fix: uncomment all referenced source files and add missing libraries to LDFLAGS. Impact: MEDIUM — applies to any mod project with lazy Makefile management.
+
+[2026-09-14] @review Dead-toggle pattern — Any cheat module not dispatched in `update_cheats()` is a dead toggle (listed ✅ but never applied); verify every apply/remove with grep on `src/cheats.c`. Impact: HIGH — applies to every new cheat.
+
+[2026-09-14] @review Blind-AOB Tier anti-pattern — Never NOP the first N matches of a generic pattern (e.g. `FF 8?` decrement); it patches unrelated code — neutralize the tier and log instead. Impact: HIGH — applies to any AOB fallback design.

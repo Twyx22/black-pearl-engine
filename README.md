@@ -136,6 +136,9 @@ make install                # copies to game directory
 
 > Cheats using dynamic `.text` section scanning (Y Velocity, Character Scale, Invincibility, Studs, Oxygen, NoClip, Infinite Ammo, etc.) are highly resilient to game patches and work across different game versions (Steam, GOG, retail).
 
+> fix/bug-sweep (c6d704a): Quick Combo, Super Punch, Mega Destruct, Infinite Cannonballs and Free Camera are now dispatched via `update_cheats` (previously listed ✅ but dead toggles).
+> Removed: generic tier-2 AOB NOP for Infinite Ammo and CALL fallback for Mega Destruct — native + targeted patterns only.
+
 ---
 
 ## Menu Tabs
