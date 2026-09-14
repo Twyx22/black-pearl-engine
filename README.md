@@ -23,7 +23,7 @@ Three patch strategies, in order of preference:
 2. **Targeted AOB patches** — dynamic `.text` scans with per-module result caching (`AobCache`), so patches survive Steam/GOG/retail version differences. Every patch uses the `PatchRecord` save/apply/restore lifecycle.
 3. **Per-frame force-writes** — for display values (stud count, golden bricks) the engine rewrites memory each frame.
 
-Every cheat toggle is dispatched through a single dirty-flag `update_cheats()` in `EndScene`; rendering happens in `Present` (`F1` toggles the menu). See [Architecture](#architecture) and `AGENTS.md` for contributor rules.
+Every cheat toggle is dispatched through a single dirty-flag `update_cheats()` in `EndScene`; rendering happens in `Present` (`F1` toggles the menu). See [Architecture](#architecture) and [Contributing](#contributing).
 
 ## Table of Contents
 
@@ -492,7 +492,6 @@ lib/
 └── imgui/                   # Dear ImGui v1.91+ (vendored, do not upgrade)
 │
 .github/workflows/build.yml # CI: MinGW cross-compile + DLL artifact
-AGENTS.md                    # Contributor instructions (read this first)
 EVOLVING.md                  # Hard-earned lessons from past work
 SECURITY.md                  # Security policy
 ```
@@ -587,7 +586,7 @@ graph TD
 
 ## Contributing
 
-1. Read `AGENTS.md` first — it has 4 hard rules (dispatch + grep check, no per-frame allocs, no `__try`, `.c` compiles as C++).
+1. Hard rules for new cheats: dispatch in `update_cheats()` (grep-check the call), no per-frame allocator rebuilds (`strdup` needs a paired `free`), no `__try` (MinGW-GCC has no SEH — `VirtualQuery` + `safe_read` only), `.c` files compile as C++ (`REFGUID` is a reference, not a pointer).
 2. Check `EVOLVING.md` before new cheat work — past lessons live there.
 3. One cheat = one `src/<name>.c/.h` pair + `CheatsState` field + `update_cheats()` dispatch + menu `Item` + `Makefile` `SRCS` + `config.h` offsets.
 4. Verify with `make clean && make`. No tests, no lint — a clean cross-compile is the gate. CI enforces it on every push.
