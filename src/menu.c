@@ -101,7 +101,6 @@ static Item fun_items[] = {
     {"Speed Mult", 1, &g_cheats.speed_mult, 1, 100, NULL},
     {"Quick Combo", 0, &g_cheats.quick_combo, 0, 0, NULL},
     {"Super Punch", 0, &g_cheats.super_punch, 0, 0, NULL},
-    {"Infinite Ammo", 0, &g_cheats.infinite_ammo, 0, 0, NULL},
 };
 
 /* --- Tab 4: Visual --- */

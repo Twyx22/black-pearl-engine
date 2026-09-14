@@ -4,7 +4,6 @@
 #include "config.h"
 #include "water.h"
 #include "noclip.h"
-#include "infinite_ammo.h"
 #include "score_mult.h"
 #include "stud_magnet.h"
 #include "quick_combo.h"
@@ -14,7 +13,7 @@
 #include "infinite_cannonballs.h"
 #include "free_camera.h"
 
-CheatsState g_cheats = {0, 0, 0, 0, 100, 1, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 75, 0, 0, 0, 0, 0};
+CheatsState g_cheats = {0, 0, 0, 0, 100, 1, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 75, 0, 0, 0, 0, 0};
 
 /* Cached module base for ASLR-safe rebase of absolute Cheat Engine VAs.
  * CE reports VAs against the preferred base 0x400000; the runtime base
@@ -891,7 +890,6 @@ void update_cheats(void) {
     if (g_cheats.no_hit_reaction) apply_no_hit_reaction(); else remove_no_hit_reaction();
 
     /* Other systems */
-    if (g_cheats.infinite_ammo) infinite_ammo_apply(); else infinite_ammo_remove();
     if (g_cheats.noclip) noclip_apply(); else noclip_remove();
     if (g_cheats.quick_combo) quick_combo_apply(); else quick_combo_remove();
     if (g_cheats.super_punch) super_punch_apply(); else super_punch_remove();
@@ -917,5 +915,4 @@ void update_cheats(void) {
      * these values, so they must be re-applied every frame. */
     force_custom_studs();
     force_golden_bricks();
-    if (g_cheats.infinite_ammo) infinite_ammo_force_frame();
 }

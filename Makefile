@@ -45,7 +45,6 @@ SRCS += src/stud_magnet.c
 SRCS += src/score_mult.c
 SRCS += src/memory_browser.c
 SRCS += src/free_camera.c
-SRCS += src/infinite_ammo.c
 SRCS += src/super_punch.c
 SRCS += src/always_gold.c
 SRCS += src/quick_combo.c

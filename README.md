@@ -112,7 +112,6 @@ Output is `d3d9.dll` at the repo root (gitignored).
 | **Super Speed** | ✅ | Memory overwrite | Overwrites walk/run speed float constants (rebased; originals read back for exact restore) |
 | **Speed Mult** | ✅ | Time hooks | Scales game time delta via `GetTickCount`/`QueryPerformanceCounter` hooks. Range: **1x to 100x** |
 | **Ultra-Wide Support** | ✅ | D3D9 hook | Hooks `SetTransform` to fix projection matrix for 21:9, 32:9, custom aspect ratios |
-| **Infinite Ammo** | ✅ | **Native + targeted AOB** | Native cheat + NOP of ammo decrement; generic blind-AOB tier removed (too destructive), force-values rewritten every frame |
 | **Super Punch** | ✅ | **Native + AOB dual** | Activates `CHEAT_SUPERSLAP` + patches damage formula for one-punch kills |
 | **Always Gold** | ✅ | **Native cheat** | Activates `cheat_always_score_multiply`; shares the flag cleanly with Score Multiplier |
 | **Quick Combo** | ✅ | **AOB scan** | Scans for combo counter increment, forces max combo |
@@ -167,7 +166,7 @@ Conflicting damage mods share patch sites and are priority-resolved (`Invincibil
 | 0 | **Health** | Invincibility, Breathe Underwater | Toggles |
 | 1 | **Damage** | Reverse Damage, One Heart, One-Hit-Kill, Damage Response Only, No Knockback, No Hit Reactions | Toggles |
 | 2 | **Studs** | Infinite Studs, Custom Value, Custom Studs, Golden Bricks, Stud Magnet, Score Multiplier (1–10), Always Gold | Toggles + Sliders |
-| 3 | **Fun** | Super Speed, Y Velocity, Y Strength (-10 to +1000), Character Scale, Scale % (10–1000), NoClip, Time Freeze, Speed Mult (1–100), Quick Combo, Super Punch, Infinite Ammo | Toggles + Sliders |
+| 3 | **Fun** | Super Speed, Y Velocity, Y Strength (-10 to +1000), Character Scale, Scale % (10–1000), NoClip, Time Freeze, Speed Mult (1–100), Quick Combo, Super Punch | Toggles + Sliders |
 | 4 | **Visual** | FPS Counter, Debug Info (F2), Remove Water, Memory Browser | Toggles + Actions |
 | 5 | **UltraWide** | Enable UW, Ratio: Auto / 16:9 / 21:9 / 32:9 | Toggles + Radio |
 | 6 | **Ammo** | Infinite Cannonballs, Mega Destruct | Toggles |
@@ -413,7 +412,6 @@ Most static addresses are relative to `_LEGOPirates.exe` base. Patches using AOB
 | **Breathe Underwater** | `FE 8E 36 03 00 00` | Locates and NOPs `DEC [esi+0x336]` |
 | **NoClip (CALL)** | `E8` (any CALL, target check) | Locates CALL instructions targeting collision handler `sub_6AC280` and NOPs them |
 | **NoClip (string ref)** | `68 xx xx xx xx` (PUSH + string check) | Locates PUSH of collision-disable strings, finds subsequent `TEST+JZ`, flips `JZ`→`JMP` |
-| **Infinite Ammo** | `FF 8? ?? ?? ?? ??` (DEC [reg+offset]) | NOPs ammo decrement instruction (exact ModRM/SIB length decode) |
 | **Infinite Cannonballs** | `FF 8? ?? ?? ?? ??` | NOPs cannonball count decrement |
 | **Quick Combo** | `FF 0?` / `FF 8?` (DEC pattern) | Forces combo counter to max |
 | **Super Punch** | `FE 8?` (DEC [reg]) | Patches damage formula for one-punch kills |
@@ -469,7 +467,6 @@ src/
 ├── noclip.c/h               # NoClip — collision patch (AOB CALL + string ref)
 ├── stud_magnet.c/h          # Stud Magnet — native cheat wrapper
 ├── score_mult.c/h           # Score Multiplier — native wrapper (validated 0/2/4/6/8/10)
-├── infinite_ammo.c/h        # Infinite Ammo — native + targeted AOB + per-frame force
 ├── super_punch.c/h          # Super Punch — native CHEAT_SUPERSLAP + damage patch
 ├── always_gold.c/h          # Always Gold — native wrapper (shares flag with score mult)
 ├── quick_combo.c/h          # Quick Combo — AOB combo counter patch
@@ -522,7 +519,7 @@ graph TD
     K --> L0["Health: invincibility, breath"]
     K --> L1["Damage: reverse, one-heart, OHK, DR-only, nokb, nohit"]
     K --> L2["Studs: infinite, custom, bricks, magnet, score mult, always gold"]
-    K --> L3["Fun: speed, Y-vel, scale, noclip, timefreeze, speedmult, combo, punch, ammo"]
+    K --> L3["Fun: speed, Y-vel, scale, noclip, timefreeze, speedmult, combo, punch"]
     K --> L4["Ammo: cannonballs, mega destruct"]
     K --> L5["Camera: free cam, teleport"]
     K --> L6["Visual: fps, debug, water, memory browser"]

@@ -24,7 +24,6 @@ typedef struct {
     int damage_response_only;
     int one_hit_kill;
     int stud_magnet;
-    int infinite_ammo;
     int quick_combo;
     int super_punch;
     int always_gold;

@@ -62,7 +62,6 @@ static ConfigMapping g_map[] = {
     {"no_hit_reaction",      &g_cheats.no_hit_reaction},
     {"damage_response_only", &g_cheats.damage_response_only},
     {"one_hit_kill",         &g_cheats.one_hit_kill},
-    {"infinite_ammo",        &g_cheats.infinite_ammo},
     {"stud_magnet",          &g_cheats.stud_magnet},
     /* New v5 fields */
     {"quick_combo",          &g_cheats.quick_combo},

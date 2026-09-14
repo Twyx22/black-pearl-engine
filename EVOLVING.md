@@ -11,6 +11,8 @@
 
 [2026-06-28] @code-builder MinGW Cross-Compile: Missing Source Files in Makefile — When adding new cheat modules, two patterns consistently cause linker errors: (1) commenting out `SRCS += src/noclip.c` and `SRCS += src/memory_browser.c` but having `cheats.c` and `menu.c` reference their functions, (2) missing Windows libraries for new API calls (e.g., `CoTaskMemFree` requires `-lole32`). Fix: uncomment all referenced source files and add missing libraries to LDFLAGS. Impact: MEDIUM — applies to any mod project with lazy Makefile management.
 
+[2026-09-14] @review Speculative-Cheat Deletion Rule — If the game has no such mechanic (no on-foot ammo in LEGO Pirates), delete the module instead of patching around it: Infinite Ammo duplicated Infinite Cannonballs with a guessed lowercase cheat name and unbased force-addrs, so the whole module was removed (files, Makefile SRCS, CheatsState field + positional initializer value, menu item, config/preset mappings, README rows). Old configs stay compatible (unknown keys are skipped by both loaders). Impact: MEDIUM — check the mechanic exists before writing a cheat.
+
 [2026-09-14] @review Dead-toggle pattern — Any cheat module not dispatched in `update_cheats()` is a dead toggle (listed ✅ but never applied); verify every apply/remove with grep on `src/cheats.c`. Impact: HIGH — applies to every new cheat.
 
 [2026-09-14] @review Blind-AOB Tier anti-pattern — Never NOP the first N matches of a generic pattern (e.g. `FF 8?` decrement); it patches unrelated code — neutralize the tier and log instead. Impact: HIGH — applies to any AOB fallback design.

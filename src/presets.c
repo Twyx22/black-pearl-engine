@@ -50,7 +50,6 @@ static const struct { const char *name; int offset; } s_preset_fields[] = {
     {"no_hit_reaction",      offsetof(CheatsState, no_hit_reaction)},
     {"damage_response_only", offsetof(CheatsState, damage_response_only)},
     {"one_hit_kill",         offsetof(CheatsState, one_hit_kill)},
-    {"infinite_ammo",        offsetof(CheatsState, infinite_ammo)},
     {"stud_magnet",          offsetof(CheatsState, stud_magnet)},
     {"quick_combo",          offsetof(CheatsState, quick_combo)},
     {"super_punch",          offsetof(CheatsState, super_punch)},
