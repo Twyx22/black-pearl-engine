@@ -1,7 +1,7 @@
 # Black Pearl Engine - Build System
 # Auto-detects MinGW on Linux (cross-compile) and Windows (native)
 
-VERSION = 0.4.0
+VERSION = 5.1.0
 
 # Detect platform: default MINGW32 path (Windows) vs PATH-based (Linux)
 ifeq ($(OS),Windows_NT)

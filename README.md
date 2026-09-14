@@ -1,19 +1,33 @@
 # Black Pearl Engine
 
-> **v5.0** — Premium mod menu / cheat engine for **LEGO Pirates of the Caribbean: The Video Game**
+> **v5.1** — Premium mod menu / cheat engine for **LEGO Pirates of the Caribbean: The Video Game**
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20(Wine%2FProton)-blue)
 ![Arch](https://img.shields.io/badge/Architecture-x86%20(32--bit)-orange)
 ![Status](https://img.shields.io/badge/Status-Active-green)
-![Version](https://img.shields.io/badge/Version-v5.0-gold)
+![Version](https://img.shields.io/badge/Version-v5.1-gold)
 ![Cheats](https://img.shields.io/badge/Cheats-35%2B-brightgreen)
 ![Tabs](https://img.shields.io/badge/Tabs-12-blueviolet)
 ![Build](https://img.shields.io/badge/Build-Debug%2FRelease-lightgrey)
+[![CI](https://github.com/Twyx22/black-pearl-engine/actions/workflows/build.yml/badge.svg)](https://github.com/Twyx22/black-pearl-engine/actions/workflows/build.yml)
 
 ![Menu Screenshot](screenshots/menu.png)
 
+## About
+
+**Black Pearl Engine** is a `d3d9.dll` proxy mod menu for LEGO Pirates of the Caribbean: The Video Game (32-bit x86). Drop the DLL next to the game executable and it intercepts Direct3D9 to overlay an ImGui menu with 35+ cheats across 12 tabs — no game files modified, no launcher, no injector.
+
+Three patch strategies, in order of preference:
+
+1. **Native cheats** — the game ships ~91 built-in cheat strings; the engine activates them by hooking the internal string-compare (`sub_473770`) via MinHook. Zero binary patching, zero version fragility.
+2. **Targeted AOB patches** — dynamic `.text` scans with per-module result caching (`AobCache`), so patches survive Steam/GOG/retail version differences. Every patch uses the `PatchRecord` save/apply/restore lifecycle.
+3. **Per-frame force-writes** — for display values (stud count, golden bricks) the engine rewrites memory each frame.
+
+Every cheat toggle is dispatched through a single dirty-flag `update_cheats()` in `EndScene`; rendering happens in `Present` (`F1` toggles the menu). See [Architecture](#architecture) and `AGENTS.md` for contributor rules.
+
 ## Table of Contents
 
+- [About](#about)
 - [Quick Start](#quick-start)
 - [What Works](#what-works)
 - [Menu Tabs](#menu-tabs)
@@ -27,6 +41,7 @@
 - [Signature Scanning & Addresses](#signature-scanning--addresses)
 - [Project Structure](#project-structure)
 - [Architecture](#architecture)
+- [Contributing](#contributing)
 - [License](#license)
 
 ---
@@ -38,14 +53,15 @@
 3. Launch the game
 4. Press **F1** to open the menu
 
+Grab a prebuilt DLL from [Actions](../../actions/workflows/build.yml) artifacts, or build it yourself:
+
 ### Build from Source
 
 **Linux (cross-compile):**
 ```bash
 sudo apt install g++-mingw-w64-i686
 make clean && make          # release build
-make DEBUG=1                # debug build with symbols
-make install                # copies to game directory
+make DEBUG=1                # debug build with symbols + debug console
 ```
 
 **Windows (Standalone Toolchain / MSYS2):**
@@ -53,18 +69,22 @@ make install                # copies to game directory
 2. Build:
    ```bash
    mingw32-make clean && mingw32-make
-   mingw32-make install   # copies to game directory
+   mingw32-make install   # copies to game directory (Windows only)
    ```
    Or use the `run` target to launch the game after install:
    ```bash
    mingw32-make run
    ```
 
+> `make install` / `make run` are **Windows-only** (`copy /y`, hardcoded `C:\GOG Games\...` path) — they don't work on Linux. CI cross-compiles with MinGW on every push.
+
 **Build Modes:**
 | Mode | Command | Flags |
 |------|---------|-------|
 | **Release** (default) | `make` | `-O2 -s` — optimized, stripped |
 | **Debug** | `make DEBUG=1` | `-O0 -g` — symbols, debug console |
+
+Output is `d3d9.dll` at the repo root (gitignored).
 
 ---
 
@@ -79,33 +99,33 @@ make install                # copies to game directory
 | **Breathe Underwater** | ✅ | **AOB scan** | NOPs oxygen timer decrement (`DEC [esi+0x336]`) |
 | **NoClip** | ✅ | **AOB scan + string ref force** | Dual-approach: NOPs CALL instructions to collision handler (`sub_6AC280`) + forces collision-disable string branches (JZ→JMP) |
 | **Stud Magnet** | ✅ | **Native cheat** | Activates game's built-in `cheat_stud_magnet` via strcmpi hook |
-| **Score Multiplier** | ✅ | **Native cheat** | `cheat_scorex2/x4/x6/x8/x10` — slider range: 1x–10x |
+| **Score Multiplier** | ✅ | **Native cheat** | `cheat_scorex2/x4/x6/x8/x10` — slider range: 1x–10x (validated; other values rejected) |
 
 ### P1 Cheats — Extended Gameplay
 
 | Cheat | Status | Method | Notes |
 |-------|--------|--------|-------|
-| **Custom Stud Value** | ✅ | Memory force | Forces custom display value every frame |
+| **Custom Stud Value** | ✅ | Memory force | Forces custom display value every frame (single per-frame call site) |
 | **Golden Bricks** | ✅ | Base + offset | Forces golden brick count |
-| **Y Velocity** | ✅ | **AOB scan** | Scans `.text` for `FMUL [reg+0xD78]` and redirects to user-controlled gravity multiplier. Slider range: **-10 to +1000** |
-| **Character Scale** | ✅ | **AOB scan** | Scans `.text` for `FLD [reg+0xFB0]` and redirects to user-controlled scale float. Slider range: **10% to 1000%** |
-| **Super Speed** | ✅ | Memory overwrite | Overwrites walk/run speed float constants |
+| **Y Velocity** | ✅ | **AOB scan** | Scans `.text` for `FMUL [reg+0xD78]` and redirects to user-controlled gravity multiplier. Slider range: **-10 to +1000** (clamped) |
+| **Character Scale** | ✅ | **AOB scan** | Scans `.text` for `FLD [reg+0xFB0]` and redirects to user-controlled scale float. Slider range: **10% to 1000%** (clamped) |
+| **Super Speed** | ✅ | Memory overwrite | Overwrites walk/run speed float constants (rebased; originals read back for exact restore) |
 | **Speed Mult** | ✅ | Time hooks | Scales game time delta via `GetTickCount`/`QueryPerformanceCounter` hooks. Range: **1x to 100x** |
 | **Ultra-Wide Support** | ✅ | D3D9 hook | Hooks `SetTransform` to fix projection matrix for 21:9, 32:9, custom aspect ratios |
-| **Infinite Ammo** | ✅ | **Native + AOB dual** | NOPs ammo decrement instruction + native cheat for built-in ammo cheats |
+| **Infinite Ammo** | ✅ | **Native + targeted AOB** | Native cheat + NOP of ammo decrement; generic blind-AOB tier removed (too destructive), force-values rewritten every frame |
 | **Super Punch** | ✅ | **Native + AOB dual** | Activates `CHEAT_SUPERSLAP` + patches damage formula for one-punch kills |
-| **Always Gold** | ✅ | **Native cheat** | Activates `cheat_always_score_multiply` for permanent gold rating |
+| **Always Gold** | ✅ | **Native cheat** | Activates `cheat_always_score_multiply`; shares the flag cleanly with Score Multiplier |
 | **Quick Combo** | ✅ | **AOB scan** | Scans for combo counter increment, forces max combo |
-| **Mega Destruct** | ✅ | **Native + AOB** | Activates `CHEAT_SELFDESTRUCT` + patches destructibility checks |
-| **Infinite Cannonballs** | ✅ | **Native + AOB dual** | NOPs cannonball decrement + activates `CHEAT_INFINITE_TORPEDOS` |
+| **Mega Destruct** | ✅ | **Native + AOB** | Activates `CHEAT_SELFDESTRUCT` + patches destructibility checks (blind-CALL fallback removed) |
+| **Infinite Cannonballs** | ✅ | **Native + AOB dual** | NOPs cannonball decrement (exact instruction-length decode) + activates `CHEAT_INFINITE_TORPEDOS` |
 | **Free Camera** | ✅ | **D3DTS_VIEW hook** | Detaches camera, WASD+mouse fly-around, custom FOV slider (30°–120°) |
-| **Memory Browser** | ✅ | **ImGui-based** | In-game hex viewer/editor with AOB search, freeze values, PE section nav |
+| **Memory Browser** | ✅ | **ImGui-based** | In-game hex viewer/editor with AOB search, freeze values, PE section nav (all reads validity-guarded) |
 
 ### P2 Cheats — Power Features
 
 | Cheat | Status | Method | Notes |
 |-------|--------|--------|-------|
-| **Teleport** | ✅ | **Entity table scan** | 10 save slots, named labels, disk persistence via `bpe_teleport.cfg` |
+| **Teleport** | ✅ | **Entity table scan** | 10 save slots, named labels, disk persistence via `bpe_teleport.cfg` (next to the DLL) |
 | **Squirrel Console** | ✅ | **sq_call injection** | Execute game scripts via embedded Squirrel VM |
 | **Save File Editor** | ✅ | **Memory I/O** | Browse/edit save files, modify stud count/brick count/completion |
 | **Level Editor Integration** | ✅ | **Constructor call** | Access game's built-in Level Editor from Tools tab |
@@ -116,28 +136,27 @@ make install                # copies to game directory
 |-----|--------|--------|-------|
 | **Reverse Damage** | ✅ | Binary patch | `DEC [EBP+0E26]` → `INC [EBP+0E26]` — heals instead of damages |
 | **One Heart Mode** | ✅ | Binary patch | Forces health init to 1 instead of 4/3 |
-| **One-Hit-Kill** | ✅ | Combo patch | One Heart + Death response = instant defeat |
+| **One-Hit-Kill** | ✅ | Combo patch | One Heart + Death response = instant defeat (preserves independent One Heart) |
 | **Damage Response Only** | ✅ | Binary patch | Entity takes damage but never dies |
 | **No Knockback** | ✅ | NOP call | NOPs the knockback `CALL` in `TakeDamage` |
 | **No Hit Reactions** | ✅ | NOP call | NOPs the hit reaction `CALL` |
+
+Conflicting damage mods share patch sites and are priority-resolved (`Invincibility > One-Hit-Kill > Damage Response Only > Reverse Damage`); suppressed flags are cleared so the menu never shows two ON states for one site.
 
 ### Menu UI & Quality of Life
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| **Menu UI** | ✅ | 12-tab ImGui overlay, Dark Gold & Sea-Teal theme |
+| **Menu UI** | ✅ | 12-tab ImGui overlay, Dark Gold & Sea-Teal theme (bounds-checked, no per-frame allocation leaks) |
 | **FPS Counter** | ✅ | Real-time FPS display toggle |
 | **Debug Info (F2)** | ✅ | Interactive Game Strings Debugger with case-insensitive search |
-| **Config V2** | ✅ | Section-based INI format (`[Cheats]`, `[Favorites]`, `[Hotkeys]`) with auto-migration from v1 |
-| **Presets System** | ✅ | Save/load named cheat profiles (max 20) |
-| **Favorites System** | ✅ | Mark cheats as favorites (F3), shown with ★ prefix |
-| **Hotkey Customization** | ✅ | Bind any key to any cheat (F3–F12, letters, numbers, modifiers) |
+| **Config V2** | ✅ | Section-based INI (`[Cheats]`, `[Favorites]`, `[Hotkeys]`) with auto-migration from v1; stored next to the DLL; atomic save (tmp + replace) |
+| **Presets System** | ✅ | Save/load named cheat profiles (max 20, names sanitized) |
+| **Favorites System** | ✅ | Mark cheats as favorites (F3), shown with ★ prefix (validated bounds) |
+| **Hotkey Customization** | ✅ | Bind any key to any cheat (F1/F2/F3 reserved, validated ranges) |
 | **Remove Water** | ✅ | Visual water removal toggle |
 
-> Cheats using dynamic `.text` section scanning (Y Velocity, Character Scale, Invincibility, Studs, Oxygen, NoClip, Infinite Ammo, etc.) are highly resilient to game patches and work across different game versions (Steam, GOG, retail).
-
-> fix/bug-sweep (c6d704a): Quick Combo, Super Punch, Mega Destruct, Infinite Cannonballs and Free Camera are now dispatched via `update_cheats` (previously listed ✅ but dead toggles).
-> Removed: generic tier-2 AOB NOP for Infinite Ammo and CALL fallback for Mega Destruct — native + targeted patterns only.
+> Cheats using dynamic `.text` section scanning are highly resilient to game patches and work across different game versions (Steam, GOG, retail). Only targeted patterns are used — generic "first N matches" scans were deliberately removed.
 
 ---
 
@@ -195,7 +214,7 @@ ENTER: Toggle/Edit  |  ARROWS: Navigate  |  F3: Fav  |  ESC: Cancel
 
 When the menu is closed, a persistent HUD shows at the top of the screen:
 ```
-Black Pearl Engine v5.0 | F1: Menu | F2: Debug | F3: Fav
+Black Pearl Engine v5.1 | F1: Menu | F2: Debug | F3: Fav
 ```
 
 ---
@@ -205,7 +224,7 @@ Black Pearl Engine v5.0 | F1: Menu | F2: Debug | F3: Fav
 Save and load named snapshots of all cheat toggles.
 
 - **Max slots:** 20
-- **Storage:** Separate files named `bpe_preset_<name>.cfg`
+- **Storage:** Separate files named `bpe_preset_<name>.cfg`, next to the DLL (names sanitized: no paths, max 48 chars)
 - **Usage:**
   1. Navigate to the **Presets** tab (10)
   2. Select **"Save Current as Preset..."**
@@ -222,7 +241,7 @@ Mark frequently used cheats as favorites so they appear with a ★ prefix.
 - **Max favorites:** 32
 - **Toggle:** Select a cheat and press **F3**
 - **Visual:** Favorite items show a gold ★ star indicator
-- **Persistence:** Favorites are saved in `bpe.cfg` under the `[Favorites]` section
+- **Persistence:** Favorites are saved in `bpe.cfg` under the `[Favorites]` section (validated on load)
 - **Storage format:** `favorite_N=<tab>,<item>` (e.g., `favorite_0=2,5`)
 
 ---
@@ -232,8 +251,8 @@ Mark frequently used cheats as favorites so they appear with a ★ prefix.
 Bind any keyboard key to toggle any cheat item, even when the menu is closed.
 
 - **Max bindings:** 32
-- **Reserved keys:** F1 (menu), F2 (debug), F3 (favorites)
-- **Modifier support:** Ctrl, Alt, Shift (used as additional bindable keys)
+- **Reserved keys:** F1 (menu), F2 (debug), F3 (favorites) — cannot be bound
+- **Valid range:** VK codes 1–255, tab/item indices bounds-checked
 - **Usage:**
   1. Navigate to the **Hotkeys** tab (11)
   2. Select a cheat item in any tab
@@ -253,7 +272,7 @@ The game binary contains **91 built-in cheat strings** discovered via IDA analys
 
 ### How It Works
 
-When `native_cheat_set("cheat_name", 1)` is called, the strcmpi hook intercepts calls to the game's cheat comparison logic and returns 0 ("equal") whenever the targeted cheat name is compared — tricking the game into activating the cheat internally.
+When `native_cheat_set("cheat_name", 1)` is called, the strcmpi hook intercepts calls to the game's cheat comparison logic and returns 0 ("equal") whenever the targeted cheat name is compared — tricking the game into activating the cheat internally. The hook is NULL-safe, logs outside the hot path, and is fully removed (with MinHook teardown) on DLL unload.
 
 ### Discovered Native Cheats
 
@@ -312,7 +331,7 @@ void native_extra_toggle(int enable);
 
 ## Config V2
 
-Config V2 introduces a section-based INI format with **auto-migration** from the old flat format.
+Config V2 introduces a section-based INI format with **auto-migration** from the old flat format. All files live **next to the DLL** (resolved via the module path, not the working directory) and are written atomically (temp file + replace, old file kept on failure).
 
 ### Format
 ```ini
@@ -341,6 +360,7 @@ hotkey_1=0x75,3,6
 - All v1 values are loaded correctly
 - On first write (menu close via F1), the file is rewritten in V2 format automatically
 - The migration marker `# bpe_cfg_v2` is written at the top of V2 files
+- Single-pass parser: sections can appear in any order, none is ever skipped
 
 ### Persistence
 - **Cheat states:** Saved on menu close (F1), immediately on toggle for critical cheats
@@ -352,7 +372,7 @@ hotkey_1=0x75,3,6
 
 ## Memory Browser
 
-An in-game hex viewer/editor accessible from the **Visual** tab or the dedicated **Memory** tab.
+An in-game hex viewer/editor accessible from the **Visual** tab or the dedicated **Memory** tab. Every read goes through validity guards (`VirtualQuery` + `safe_read`) — invalid rows render as `??` and can never be edited, frozen, or searched into a crash.
 
 ### Features
 - **Hex dump:** 16 bytes per row, ASCII sidebar, color-coded by PE section
@@ -361,9 +381,9 @@ An in-game hex viewer/editor accessible from the **Visual** tab or the dedicated
   - **Green** = `.data` (read-write data)
   - **Dark red** = invalid/unreadable memory
 - **Navigation:** Address input field, Go button, << / >> page browsing, PE section quick-jump buttons
-- **Edit:** Click any byte to open an edit popup — type a hex value and press Enter
-- **AOB Search:** Search for byte patterns (e.g., `48 65 ?? 6C 6F`) across all readable memory, with result navigation (Prev/Next/Jump)
-- **Freeze Values:** Lock memory addresses to specific byte values (updated every frame), max 32 entries
+- **Edit:** Click any byte to open an edit popup — type a hex value and press Enter (valid rows only)
+- **AOB Search:** Search for byte patterns (e.g., `48 65 ?? 6C 6F`) in 4K chunks via `safe_read`, skipping unmapped pages
+- **Freeze Values:** Lock memory addresses to specific byte values (revalidated every frame, max 32 entries, zero/invalid addresses skipped)
 - **Refresh:** Re-read the current page from process memory
 
 ### Controls
@@ -379,7 +399,7 @@ An in-game hex viewer/editor accessible from the **Visual** tab or the dedicated
 
 ## Signature Scanning & Addresses
 
-Most static addresses are relative to `_LEGOPirates.exe` base. Patches using AOB (Array of Bytes) patterns scan the game's executable `.text` segment on startup for stability across versions. All AOB scans use the **AOB Cache** system (`AobCache` struct) guaranteeing each pattern is scanned at most once per session.
+Most static addresses are relative to `_LEGOPirates.exe` base. Patches using AOB (Array of Bytes) patterns scan the game's executable `.text` segment on startup for stability across versions. All AOB scans use the **AOB Cache** system (`AobCache` struct) guaranteeing each pattern is scanned at most once per session. `patch_apply` refuses null addresses and zero sizes, so a failed scan can never patch address 0.
 
 ### Dynamically Scanned Patches (AOB)
 
@@ -393,7 +413,7 @@ Most static addresses are relative to `_LEGOPirates.exe` base. Patches using AOB
 | **Breathe Underwater** | `FE 8E 36 03 00 00` | Locates and NOPs `DEC [esi+0x336]` |
 | **NoClip (CALL)** | `E8` (any CALL, target check) | Locates CALL instructions targeting collision handler `sub_6AC280` and NOPs them |
 | **NoClip (string ref)** | `68 xx xx xx xx` (PUSH + string check) | Locates PUSH of collision-disable strings, finds subsequent `TEST+JZ`, flips `JZ`→`JMP` |
-| **Infinite Ammo** | `FF 8? ?? ?? ?? ??` (DEC [reg+offset]) | NOPs ammo decrement instruction |
+| **Infinite Ammo** | `FF 8? ?? ?? ?? ??` (DEC [reg+offset]) | NOPs ammo decrement instruction (exact ModRM/SIB length decode) |
 | **Infinite Cannonballs** | `FF 8? ?? ?? ?? ??` | NOPs cannonball count decrement |
 | **Quick Combo** | `FF 0?` / `FF 8?` (DEC pattern) | Forces combo counter to max |
 | **Super Punch** | `FE 8?` (DEC [reg]) | Patches damage formula for one-punch kills |
@@ -404,11 +424,11 @@ Most static addresses are relative to `_LEGOPirates.exe` base. Patches using AOB
 
 | Purpose | Address / Offset | Notes |
 |---------|------------------|-------|
-| Stud display | `0x0369B660` (4 bytes) | Forced each frame for custom value |
+| Stud display | heap absolute `0x0369B660` (4 bytes) | Forced each frame for custom value (documented heap address, not image-relative) |
 | Golden bricks | `base + 0x00B776E4` (4 bytes) | Forced each frame |
 | Entity table | `base + 0x00C8F400` | Pointer array to entity strings (used by Teleport) |
-| Walk speed | `0x00E24C50` (float) | Overwritten for Super Speed |
-| Run speed | `0x00E24C54` (float) | Overwritten for Super Speed |
+| Walk speed | `base + offset of 0x00E24C50` (float) | Rebased at runtime; original read back for exact restore |
+| Run speed | `base + offset of 0x00E24C54` (float) | Rebased at runtime; original read back for exact restore |
 | Aspect ratio | `base + 0x006740B0` (float) | Saved/restored for Ultra-Wide |
 | Entity position X | `entity_ptr + 0x28` (float) | Read/written for Teleport |
 | Entity position Y | `entity_ptr + 0x2C` (float) | Read/written for Teleport |
@@ -437,50 +457,47 @@ Most static addresses are relative to `_LEGOPirates.exe` base. Patches using AOB
 
 ```
 src/
-├── config.h                 # Memory addresses, offsets, and constants (v5 expanded)
-├── config_loader.c/h        # Config V2 — section-based INI with auto-migration
-├── cheats.c/h               # All cheat implementations + Damage System Refactor
+├── config.h                 # Memory addresses, offsets, and constants
+├── config_loader.c/h        # Config V2 — section INI, DLL-dir paths, atomic save
+├── cheats.c/h               # Core cheats + dirty-flag update_cheats() dispatch
 ├── menu.c/h                 # 12-tab ImGui overlay, favorites/presets/hotkeys UI
-├── hooks.c/h                # D3D9 vtable hooks, time hooks, WndProc subclass
+├── hooks.c/h                # D3D9 vtable hooks, time hooks, WndProc subclass, cleanup
 ├── input.c/h                # DirectInput8 hooks for keyboard capture
-├── utils.c/h                # safe_write/read, PatchRecord, AOB cache, .text discovery
+├── utils.c/h                # safe_write/read, PatchRecord, AOB cache, bpe_path
 ├── uw.c/h                   # Ultra-wide support (aspect ratio patching, SetTransform hook)
-
-# P0 Cheats
-├── noclip.c/h               # NoClip — collision patch (dual approach AOB + string ref)
+│
+├── noclip.c/h               # NoClip — collision patch (AOB CALL + string ref)
 ├── stud_magnet.c/h          # Stud Magnet — native cheat wrapper
-├── score_mult.c/h           # Score Multiplier — native cheat wrapper (x2/x4/x6/x8/x10)
-
-# P1 Cheats
-├── infinite_ammo.c/h        # Infinite Ammo — native + AOB dual approach
+├── score_mult.c/h           # Score Multiplier — native wrapper (validated 0/2/4/6/8/10)
+├── infinite_ammo.c/h        # Infinite Ammo — native + targeted AOB + per-frame force
 ├── super_punch.c/h          # Super Punch — native CHEAT_SUPERSLAP + damage patch
-├── always_gold.c/h          # Always Gold — native cheat wrapper
+├── always_gold.c/h          # Always Gold — native wrapper (shares flag with score mult)
 ├── quick_combo.c/h          # Quick Combo — AOB combo counter patch
 ├── mega_destruct.c/h        # Mega Destruct — native CHEAT_SELFDESTRUCT + AOB
 ├── infinite_cannonballs.c/h # Infinite Cannonballs — native + AOB dual approach
 ├── free_camera.c/h          # Free Camera — D3DTS_VIEW/D3DTS_PROJECTION hook
-├── memory_browser.c/h       # Memory Browser — ImGui hex editor with AOB search + freeze
+├── memory_browser.c/h       # Memory Browser — guarded hex editor + AOB search + freeze
 ├── native_cheats.c/h        # Native cheat activation system (strcmpi hook)
 ├── water.c/h                # Water removal patch
-
-# P2 Cheats
-├── teleport.c/h             # Teleport — 10 save slots, entity table scan, disk persistence
+├── teleport.c/h             # Teleport — 10 slots, entity scan, DLL-dir persistence
 ├── squirrel_console.c/h     # Squirrel Console — execute game scripts
 ├── save_editor.c/h          # Save File Editor — browse/edit save files
 ├── level_editor.c/h         # Level Editor Integration — constructor call
-
-# UI Systems
-├── presets.c/h              # Presets System — named cheat profiles (max 20)
+├── presets.c/h              # Presets System — named profiles (max 20, sanitized)
 ├── favorites.c/h            # Favorites System — F3 toggle, ★ prefix (max 32)
 ├── hotkeys.c/h              # Hotkey Customization — any key to any cheat (max 32)
-
-# Entry Point
-├── d3d9_proxy.c             # DllMain + Direct3DCreate9 proxy (entry point)
-├── d3d9_proxy.def           # DLL exports
-
+│
+├── d3d9_proxy.c             # DllMain + init/teardown (entry point)
+├── d3d9_proxy.def           # DLL exports (full d3d9 forwarder set)
+│
 lib/
-├── minhook/                 # MinHook library (API hooking — native cheats, time, D3D9)
-└── imgui/                   # Dear ImGui (menu rendering, memory browser UI)
+├── minhook/                 # MinHook library (vendored, do not upgrade)
+└── imgui/                   # Dear ImGui v1.91+ (vendored, do not upgrade)
+│
+.github/workflows/build.yml # CI: MinGW cross-compile + DLL artifact
+AGENTS.md                    # Contributor instructions (read this first)
+EVOLVING.md                  # Hard-earned lessons from past work
+SECURITY.md                  # Security policy
 ```
 
 ---
@@ -494,14 +511,14 @@ graph TD
     C --> D[IDirect3D9 vtable hook]
     D --> E[CreateDevice hook]
     E --> F[IDirect3DDevice9 vtable hook]
-    
+
     F --> G[EndScene - cheat updates + menu input]
     F --> H[Present - ImGui rendering]
     F --> I[Reset - device lost handling]
     F --> J[SetTransform - ultra-wide + free camera projection fix]
-    
+
     G --> K[update_cheats - dirty-flag optimized]
-    
+
     K --> L0[Health: invincibility, breath]
     K --> L1[Damage: reverse, one-heart, OHK, DR-only, nokb, nohit]
     K --> L2[Studs: infinite, custom, bricks, magnet, score mult, always gold]
@@ -509,20 +526,20 @@ graph TD
     K --> L4[Ammo: cannonballs, mega destruct]
     K --> L5[Camera: free cam, teleport]
     K --> L6[Visual: fps, debug, water, memory browser]
-    
+
     G --> M[Native Cheat System - strcmpi hook]
     M --> N[native_cheat_set - activate 20+ built-in cheats]
-    
+
     G --> O[Hotkey Check - hotkeys_check]
     O --> P[Hotkey bindings toggle cheats even when menu closed]
-    
-    G --> Q[Memory Browser freeze values]
-    
+
+    G --> Q[Memory Browser freeze values - revalidated per frame]
+
     F --> R[Time Hooks]
     R --> S[GetTickCount hook]
     R --> T[QueryPerformanceCounter hook]
     R --> U[timeGetTime hook]
-    
+
     H --> V[ImGui render - 12 tabs]
     V --> W[Tab 0-5: Health/Damage/Studs/Fun/Visual/UltraWide]
     V --> X[Tab 6-7: Ammo/Camera]
@@ -531,23 +548,23 @@ graph TD
     V --> AA[Hotkey indicator per cheat]
     V --> AB[Game Strings Debugger (F2)]
     V --> AC[Memory Browser hex dump window]
-    
-    AC --> AD[AOB search across process memory]
+
+    AC --> AD[AOB search across process memory - guarded chunks]
     AC --> AE[Freeze values - per-frame write]
 ```
 
 ### Architecture Overview
 
-1. **D3D9 Proxy** — The DLL is loaded by the game as a `d3d9.dll` proxy, intercepting Direct3D9 initialization.
-2. **Device Hooks** — All cheat state updates (+ menu input) run in `EndScene`, rendering in `Present`.
+1. **D3D9 Proxy** — The DLL is loaded by the game as a `d3d9.dll` proxy, intercepting Direct3D9 initialization. It exports the full d3d9 forwarder set (unknown exports resolve to the real system DLL, never recurse).
+2. **Device Hooks** — All cheat state updates (+ menu input) run in `EndScene`, rendering in `Present`. On unload: WndProc restored, MinHook fully torn down, config saved.
 3. **Native Cheat System** — MinHook intercepts `strcmpi` to activate 20+ built-in game cheats by name.
-4. **AOB Pattern Scanning** — All binary patches use dynamic `.text` scanning + `AobCache` for version resilience.
-5. **PatchRecord API** — Every binary patch uses the `patch_apply`/`patch_restore` lifecycle with VirtualProtect wrapping, original byte saving, and error logging.
-6. **Dirty-Flag Optimization** — `update_cheats()` only applies/removes patches when state actually changes (memcmp before/after).
-7. **Mutual Exclusion** — Damage mods enforce mutual exclusion: Invincibility XOR Damage Response Only (same address conflict).
-8. **Config V2** — Section-based INI format with auto-migration from v1. New sections: `[Cheats]`, `[Favorites]`, `[Hotkeys]`.
+4. **AOB Pattern Scanning** — All binary patches use dynamic `.text` scanning + `AobCache` for version resilience. Only targeted patterns — generic multi-match scans are banned.
+5. **PatchRecord API** — Every binary patch uses the `patch_apply`/`patch_restore` lifecycle with VirtualProtect wrapping, original byte saving, and error logging. Null addresses are refused.
+6. **Dirty-Flag Optimization** — `update_cheats()` only applies/removes patches when state actually changes (memcmp before/after); per-frame force-writes run from a single call site.
+7. **Mutual Exclusion** — Damage mods enforce priority: Invincibility > One-Hit-Kill > Damage Response Only > Reverse Damage (shared-site conflicts resolved, flags cleared).
+8. **Config V2** — Section-based INI with auto-migration from v1, DLL-directory paths, atomic saves. New sections: `[Cheats]`, `[Favorites]`, `[Hotkeys]`.
 9. **Free Camera** — Hooks D3DTS_VIEW and D3DTS_PROJECTION via `SetTransform`, providing full first-person camera control with WSAD+mouse look.
-10. **Memory Browser** — Full PE-section-aware hex editor with AOB pattern search and value freezing.
+10. **Memory Browser** — Full PE-section-aware hex editor with guarded AOB search and revalidated value freezing.
 
 ### Damage System Architecture (Mutual Exclusion)
 
@@ -564,11 +581,20 @@ graph TD
 │   One-Hit-Kill   │ → NOP (never heals back)     │
 │   Response Only  │ → NOP (never dies)           │
 ├──────────────────┼───────────────────────────────┤
-│ Constraints:     │ Invincible XOR Response Only  │
-│                  │ One-Hit-Kill = NOP death      │
-│                  │ + no extra constraints         │
+│ Priority:        │ Invincible > OHK > DR > Rev  │
+│ One-Hit-Kill =   │ One Heart + Death NOP        │
 └──────────────────┴───────────────────────────────┘
 ```
+
+---
+
+## Contributing
+
+1. Read `AGENTS.md` first — it has 4 hard rules (dispatch + grep check, no per-frame allocs, no `__try`, `.c` compiles as C++).
+2. Check `EVOLVING.md` before new cheat work — past lessons live there.
+3. One cheat = one `src/<name>.c/.h` pair + `CheatsState` field + `update_cheats()` dispatch + menu `Item` + `Makefile` `SRCS` + `config.h` offsets.
+4. Verify with `make clean && make`. No tests, no lint — a clean cross-compile is the gate. CI enforces it on every push.
+5. Work on `fix/<nom>` / `feature/<nom>` branches, atomic commits, merge after a green build.
 
 ---
 
