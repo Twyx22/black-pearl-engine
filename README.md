@@ -492,7 +492,6 @@ lib/
 └── imgui/                   # Dear ImGui v1.91+ (vendored, do not upgrade)
 │
 .github/workflows/build.yml # CI: MinGW cross-compile + DLL artifact
-EVOLVING.md                  # Hard-earned lessons from past work
 SECURITY.md                  # Security policy
 ```
 
@@ -586,11 +585,10 @@ graph TD
 
 ## Contributing
 
-1. Hard rules for new cheats: dispatch in `update_cheats()` (grep-check the call), no per-frame allocator rebuilds (`strdup` needs a paired `free`), no `__try` (MinGW-GCC has no SEH — `VirtualQuery` + `safe_read` only), `.c` files compile as C++ (`REFGUID` is a reference, not a pointer).
-2. Check `EVOLVING.md` before new cheat work — past lessons live there.
-3. One cheat = one `src/<name>.c/.h` pair + `CheatsState` field + `update_cheats()` dispatch + menu `Item` + `Makefile` `SRCS` + `config.h` offsets.
-4. Verify with `make clean && make`. No tests, no lint — a clean cross-compile is the gate. CI enforces it on every push.
-5. Work on `fix/<nom>` / `feature/<nom>` branches, atomic commits, merge after a green build.
+1. Hard rules for new cheats: dispatch in `update_cheats()` (grep-check the call), no per-frame allocator rebuilds (`strdup` needs a paired `free`), no `__try` (MinGW-GCC has no SEH — `VirtualQuery` + `safe_read` only), `.c` files compile as C++ (`REFGUID` is a reference, not a pointer). If the game has no such mechanic, delete the module instead of patching around it.
+2. One cheat = one `src/<name>.c/.h` pair + `CheatsState` field + `update_cheats()` dispatch + menu `Item` + `Makefile` `SRCS` + `config.h` offsets.
+3. Verify with `make clean && make`. No tests, no lint — a clean cross-compile is the gate. CI enforces it on every push.
+4. Work on `fix/<nom>` / `feature/<nom>` branches, atomic commits, merge after a green build.
 
 ---
 
