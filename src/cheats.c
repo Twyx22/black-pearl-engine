@@ -7,6 +7,12 @@
 #include "infinite_ammo.h"
 #include "score_mult.h"
 #include "stud_magnet.h"
+#include "quick_combo.h"
+#include "super_punch.h"
+#include "always_gold.h"
+#include "mega_destruct.h"
+#include "infinite_cannonballs.h"
+#include "free_camera.h"
 
 CheatsState g_cheats = {0, 0, 0, 0, 100, 1, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 75, 0, 0, 0, 0, 0};
 
@@ -34,9 +40,12 @@ void apply_stud_patch(void) {
         }
     }
     
-    /* Read original bytes */
-    memcpy(g_stud_sub_orig, (void*)g_stud_sub_addr, 2);
-    memcpy(g_stud_sbb_orig, (void*)g_stud_sbb_addr, 2);
+    /* Read original bytes (guarded: target may be unreadable) */
+    if (!safe_read(g_stud_sub_addr, g_stud_sub_orig, 2) ||
+        !safe_read(g_stud_sbb_addr, g_stud_sbb_orig, 2)) {
+        LOG("Infinite Studs: cannot read patch target 0x%08X", g_stud_sub_addr);
+        return;
+    }
     
     /* NOP sub ebx,eax (2 bytes) */
     unsigned char nop2[2] = {0x90, 0x90};
@@ -744,7 +753,9 @@ void apply_one_hit_kill(void) {
     LOG("One-Hit-Kill: NOP'd death reset at 0x%08X", g_ohk_death_rec.addr);
 }
 void remove_one_hit_kill(void) {
+    int keep_heart = g_cheats.one_heart;
     remove_one_heart();
+    if (keep_heart) apply_one_heart();
 
     if (!g_ohk_death_rec.active) return;
     patch_restore(&g_ohk_death_rec);
@@ -802,6 +813,9 @@ void update_cheats(void) {
         remove_one_hit_kill();
         if (g_cheats.damage_response_only || g_cheats.reverse_damage || g_cheats.one_hit_kill)
             LOG("Damage: invincible active - suppressed conflicting cheat(s)");
+        g_cheats.damage_response_only = 0;
+        g_cheats.reverse_damage = 0;
+        g_cheats.one_hit_kill = 0;
     } else if (g_cheats.one_hit_kill) {
         /* Second priority: patches death address */
         apply_one_hit_kill();
@@ -810,6 +824,8 @@ void update_cheats(void) {
         remove_reverse_damage();
         if (g_cheats.damage_response_only || g_cheats.reverse_damage)
             LOG("Damage: one_hit_kill active - suppressed conflicting cheat(s)");
+        g_cheats.damage_response_only = 0;
+        g_cheats.reverse_damage = 0;
     } else if (g_cheats.damage_response_only) {
         /* Third priority: patches damage address only */
         apply_damage_response_only();
@@ -818,12 +834,16 @@ void update_cheats(void) {
         remove_one_hit_kill();
         if (g_cheats.reverse_damage)
             LOG("Damage: damage_response_only active - suppressed conflicting cheat(s)");
+        g_cheats.reverse_damage = 0;
+        g_cheats.one_hit_kill = 0;
     } else if (g_cheats.reverse_damage) {
         /* Lowest priority on damage address */
         apply_reverse_damage();
         remove_health_patch();
         remove_damage_response_only();
         remove_one_hit_kill();
+        g_cheats.damage_response_only = 0;
+        g_cheats.one_hit_kill = 0;
     } else {
         /* No conflicting damage mods - ensure all clean */
         remove_health_patch();
@@ -844,6 +864,12 @@ void update_cheats(void) {
     /* Other systems */
     if (g_cheats.infinite_ammo) infinite_ammo_apply(); else infinite_ammo_remove();
     if (g_cheats.noclip) noclip_apply(); else noclip_remove();
+    if (g_cheats.quick_combo) quick_combo_apply(); else quick_combo_remove();
+    if (g_cheats.super_punch) super_punch_apply(); else super_punch_remove();
+    if (g_cheats.always_gold) always_gold_apply(); else always_gold_remove();
+    if (g_cheats.mega_destruct) mega_destruct_apply(); else mega_destruct_remove();
+    if (g_cheats.infinite_cannonballs) infinite_cannonballs_apply(); else infinite_cannonballs_remove();
+    if (g_cheats.free_camera != free_camera_is_active()) free_camera_toggle();
 
     if (time_freeze_rising) {
         time_freeze_snapshot();

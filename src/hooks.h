@@ -12,6 +12,7 @@ extern DWORD g_freeze_tick;
 extern LONGLONG g_freeze_perf;
 void install_time_hooks(void);
 void time_freeze_snapshot(void);
+void hooks_cleanup(void);
 
 extern HWND g_game_hwnd;
 extern int g_imgui_ready;

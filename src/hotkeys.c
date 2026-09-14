@@ -124,15 +124,15 @@ void hotkeys_check(void) {
     for (int i = 0; i < HOTKEYS_MAX; i++) {
         if (!g_hotkeys[i].active) continue;
         int vk = g_hotkeys[i].vk;
-        if (vk < 0 || vk >= 256) continue;
+        if (vk <= 0 || vk > 255) continue;
 
         /* Rising edge detection */
         if (g_key_states[vk] && !s_prev_states[vk]) {
             int tab = g_hotkeys[i].tab;
             int item = g_hotkeys[i].item;
 
-            /* Bound check */
-            if (tab >= 0 && tab < 12 && item >= 0) {
+            /* Bound check (item upper bound enforced by menu_get_item) */
+            if (tab >= 0 && tab < TAB_COUNT && item >= 0) {
                 Item *it = menu_get_item(tab, item);
                 if (it && it->type == 0 && it->val) {
                     /* Toggle the cheat */
@@ -148,6 +148,9 @@ void hotkeys_check(void) {
 }
 
 int hotkeys_bind(int vk, int tab, int item) {
+    if (vk <= 0 || vk > 255) return -1;
+    if (vk == VK_F1 || vk == VK_F2 || vk == VK_F3) return -1;
+    if (tab < 0 || tab >= TAB_COUNT || item < 0) return -1;
     /* Check if already bound to this (tab, item) */
     int existing = hotkeys_find(tab, item);
     if (existing >= 0) {

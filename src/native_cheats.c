@@ -78,6 +78,10 @@ static CheatFlag *flag_ensure(const char *name) {
  *  strcmpi hook — the core of the native cheat activation system      *
  * ------------------------------------------------------------------ */
 static int __cdecl hk_strcmpi(const char *a, const char *b) {
+    /* Orig unavailable — neutral, no LOG here (hot path) */
+    if (!g_orig_strcmpi)
+        return 0;
+
     /* Fast path: no force-active cheats → pass through immediately */
     if (g_force_count == 0)
         return g_orig_strcmpi(a, b);
@@ -326,6 +330,13 @@ int native_cheat_set(const char *cheat_name, int enable) {
         return 0;
     }
 
+    /* Orig missing — log once here, never in the hk_strcmpi hot path */
+    if (!g_orig_strcmpi) {
+        LOG("NativeCheats: cannot use \"%s\" — original strcmpi is NULL",
+            cheat_name);
+        return 0;
+    }
+
     /* Ensure a flag entry exists for this cheat */
     CheatFlag *cf = flag_ensure(cheat_name);
     if (!cf) return 0;
@@ -340,7 +351,12 @@ int native_cheat_set(const char *cheat_name, int enable) {
                 break;
             }
         }
-        if (!found && g_force_count < MAX_FORCE_CHEATS) {
+        if (!found) {
+            if (g_force_count >= MAX_FORCE_CHEATS) {
+                LOG("NativeCheats: cannot force \"%s\" — table full (%d)",
+                    cheat_name, MAX_FORCE_CHEATS);
+                return 0;
+            }
             g_force_names[g_force_count] = cf->name;
             g_force_active[g_force_count] = 1;
             g_force_count++;

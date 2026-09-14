@@ -3,3 +3,11 @@ EXPORTS
     Direct3DCreate9Ex
     D3DPERF_BeginEvent
     D3DPERF_EndEvent
+    Direct3DShaderValidatorCreate9
+    D3DPERF_GetStatus
+    D3DPERF_QueryRepeatFrame
+    D3DPERF_SetMarker
+    D3DPERF_SetOptions
+    D3DPERF_SetRegion
+    DebugSetLevel
+    DebugSetMute

@@ -86,15 +86,55 @@ static LONGLONG scale_qpc_delta(LONGLONG real) {
     return g_speed_qpc_last_out;
 }
 
+/* System fallback resolvers (GetProcAddress bypasses our own MinHook
+   detours, so no recursion even if real_* is NULL). Resolved once. */
+static DWORD WINAPI sys_GetTickCount(void) {
+    static DWORD (WINAPI *f)(void) = NULL;
+    static int init = 0;
+    if (!init) {
+        init = 1;
+        HMODULE k = GetModuleHandleA("kernel32.dll");
+        if (k) f = (DWORD (WINAPI *)(void))GetProcAddress(k, "GetTickCount");
+    }
+    return f ? f() : 0;
+}
+
+static BOOL WINAPI sys_QueryPerformanceCounter(LARGE_INTEGER *lp) {
+    static BOOL (WINAPI *f)(LARGE_INTEGER*) = NULL;
+    static int init = 0;
+    if (!init) {
+        init = 1;
+        HMODULE k = GetModuleHandleA("kernel32.dll");
+        if (k) f = (BOOL (WINAPI *)(LARGE_INTEGER*))GetProcAddress(k, "QueryPerformanceCounter");
+    }
+    return f ? f(lp) : FALSE;
+}
+
+static DWORD WINAPI sys_timeGetTime(void) {
+    static DWORD (WINAPI *f)(void) = NULL;
+    static int init = 0;
+    if (!init) {
+        init = 1;
+        HMODULE k = GetModuleHandleA("winmm.dll");
+        if (k) f = (DWORD (WINAPI *)(void))GetProcAddress(k, "timeGetTime");
+    }
+    return f ? f() : 0;
+}
+
 static DWORD WINAPI hk_GetTickCount(void) {
-    DWORD real = real_GetTickCount();
+    DWORD real = real_GetTickCount ? real_GetTickCount() : sys_GetTickCount();
     if (g_cheats.time_freeze) return g_freeze_tick;
     return scale_tic_delta(real);
 }
 
 static BOOL WINAPI hk_QueryPerformanceCounter(LARGE_INTEGER *lpCount) {
-    if (!lpCount) return real_QueryPerformanceCounter(lpCount);
-    BOOL ok = real_QueryPerformanceCounter(lpCount);
+    if (!lpCount) return FALSE;
+    BOOL ok;
+    if (real_QueryPerformanceCounter) {
+        ok = real_QueryPerformanceCounter(lpCount);
+    } else {
+        ok = sys_QueryPerformanceCounter(lpCount);
+    }
     if (!ok) return FALSE;
     if (g_cheats.time_freeze) {
         lpCount->QuadPart = g_freeze_perf;
@@ -105,7 +145,7 @@ static BOOL WINAPI hk_QueryPerformanceCounter(LARGE_INTEGER *lpCount) {
 }
 
 static DWORD WINAPI hk_timeGetTime(void) {
-    DWORD real = real_timeGetTime();
+    DWORD real = real_timeGetTime ? real_timeGetTime() : sys_timeGetTime();
     if (g_cheats.time_freeze) return g_freeze_tick;
     return scale_tic_delta(real);
 }
@@ -175,6 +215,14 @@ static void hook_window(HWND hwnd) {
         SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)hk_wndproc);
         LOG("Window subclassed: hwnd=%p oldproc=%p", hwnd, g_orig_wndproc);
         PostMessage(hwnd, WM_NULL, 0, 0);
+    }
+}
+
+void hooks_cleanup(void) {
+    if (g_game_hwnd && g_orig_wndproc) {
+        SetWindowLongPtr(g_game_hwnd, GWLP_WNDPROC, (LONG_PTR)g_orig_wndproc);
+        LOG("Window subclass restored: hwnd=%p", g_game_hwnd);
+        g_orig_wndproc = NULL;
     }
 }
 
@@ -366,4 +414,71 @@ extern "C" __declspec(dllexport) int WINAPI D3DPERF_EndEvent(void) {
     char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
     HMODULE h = GetModuleHandleA(path); if (h) f = (fn)GetProcAddress(h, "D3DPERF_EndEvent");
     return f ? f() : 0;
+}
+
+/* Missing d3d9 exports: forwarded to the real system d3d9 via
+   GetSystemDirectoryA path (never "d3d9" by name: that would recurse
+   into this proxy DLL). Same LoadLibraryA pattern as Direct3DCreate9. */
+extern "C" __declspec(dllexport) HRESULT WINAPI Direct3DShaderValidatorCreate9(void) {
+    typedef HRESULT (WINAPI *fn)(void);
+    fn f = NULL;
+    char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
+    HMODULE h = LoadLibraryA(path); if (h) f = (fn)GetProcAddress(h, "Direct3DShaderValidatorCreate9");
+    return f ? f() : E_NOTIMPL;
+}
+
+extern "C" __declspec(dllexport) DWORD WINAPI D3DPERF_GetStatus(void) {
+    typedef DWORD (WINAPI *fn)(void);
+    fn f = NULL;
+    char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
+    HMODULE h = LoadLibraryA(path); if (h) f = (fn)GetProcAddress(h, "D3DPERF_GetStatus");
+    return f ? f() : 0;
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI D3DPERF_QueryRepeatFrame(void) {
+    typedef BOOL (WINAPI *fn)(void);
+    fn f = NULL;
+    char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
+    HMODULE h = LoadLibraryA(path); if (h) f = (fn)GetProcAddress(h, "D3DPERF_QueryRepeatFrame");
+    return f ? f() : FALSE;
+}
+
+extern "C" __declspec(dllexport) void WINAPI D3DPERF_SetMarker(D3DCOLOR color, LPCWSTR name) {
+    typedef void (WINAPI *fn)(D3DCOLOR, LPCWSTR);
+    fn f = NULL;
+    char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
+    HMODULE h = LoadLibraryA(path); if (h) f = (fn)GetProcAddress(h, "D3DPERF_SetMarker");
+    if (f) f(color, name);
+}
+
+extern "C" __declspec(dllexport) void WINAPI D3DPERF_SetOptions(DWORD options) {
+    typedef void (WINAPI *fn)(DWORD);
+    fn f = NULL;
+    char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
+    HMODULE h = LoadLibraryA(path); if (h) f = (fn)GetProcAddress(h, "D3DPERF_SetOptions");
+    if (f) f(options);
+}
+
+extern "C" __declspec(dllexport) void WINAPI D3DPERF_SetRegion(D3DCOLOR color, LPCWSTR name) {
+    typedef void (WINAPI *fn)(D3DCOLOR, LPCWSTR);
+    fn f = NULL;
+    char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
+    HMODULE h = LoadLibraryA(path); if (h) f = (fn)GetProcAddress(h, "D3DPERF_SetRegion");
+    if (f) f(color, name);
+}
+
+extern "C" __declspec(dllexport) void WINAPI DebugSetLevel(DWORD level) {
+    typedef void (WINAPI *fn)(DWORD);
+    fn f = NULL;
+    char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
+    HMODULE h = LoadLibraryA(path); if (h) f = (fn)GetProcAddress(h, "DebugSetLevel");
+    if (f) f(level);
+}
+
+extern "C" __declspec(dllexport) void WINAPI DebugSetMute(BOOL mute) {
+    typedef void (WINAPI *fn)(BOOL);
+    fn f = NULL;
+    char path[MAX_PATH]; GetSystemDirectoryA(path, MAX_PATH); strcat(path, "\\d3d9.dll");
+    HMODULE h = LoadLibraryA(path); if (h) f = (fn)GetProcAddress(h, "DebugSetMute");
+    if (f) f(mute);
 }

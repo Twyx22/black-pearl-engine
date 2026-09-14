@@ -115,36 +115,9 @@ void mega_destruct_apply(void)
         g_fallback_scanned = 1;
     }
 
-    /* Fallback 2: scan for NOP-able destructibility checks
-     * Look for CALL instructions near the self-destruct string
-     * references that might be destructibility validation functions */
-    if (g_patch_count == 0 && base) {
-        DWORD text_start, text_size;
-        if (find_text_section(&text_start, &text_size)) {
-            unsigned char *code = (unsigned char *)text_start;
-
-            for (DWORD i = 0; i + 5 < text_size && g_patch_count < MAX_DESTRUCT_PATCHES; i++) {
-                /* We found the string reference earlier, now look for CALL
-                 * instructions that might be destructibility check functions.
-                 * For each CALL (E8), NOP it to disable the check. */
-                if (code[i] != 0xE8) continue;
-
-                DWORD call_addr = text_start + i;
-                LOG("MegaDestruct: found potential destruct CALL at 0x%08X (fallback-2)", call_addr);
-
-                PatchRecord pr = {0};
-                pr.addr = call_addr;
-                pr.size = 5;
-
-                unsigned char nops[5] = {0x90, 0x90, 0x90, 0x90, 0x90};
-                if (patch_apply(&pr, nops)) {
-                    g_patches[g_patch_count++] = pr;
-                    LOG("MegaDestruct: NOP'd destruct check at 0x%08X", call_addr);
-                    break;  /* One patch is enough for testing */
-                }
-            }
-        }
-    }
+    /* Fallback 2 disabled: NOP'ing the first CALL in .text hits unrelated
+     * code and is destructive. Native cheat + fallback-1 are unaffected. */
+    LOG("MegaDestruct: fallback-2 disabled — pattern too generic, skipping");
 
     g_destruct_enabled = 1;
     LOG("MegaDestruct: activated with %d fallback patch(es)", g_patch_count);

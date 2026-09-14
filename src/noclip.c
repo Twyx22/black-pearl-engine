@@ -27,6 +27,7 @@
 
 #define MAX_NOCLIP_PATCHES  64
 static PatchRecord g_patches[MAX_NOCLIP_PATCHES];
+static unsigned char g_patch_kind[MAX_NOCLIP_PATCHES]; /* 0=NOP, 1=JZ->JMP */
 static int         g_patch_count = 0;
 static int         g_noclip_active = 0;
 static int         g_noclip_scanned = 0;
@@ -51,6 +52,7 @@ static int add_nop_patch(DWORD addr, int size)
     memset(nops, 0x90, (size_t)size);
 
     if (patch_apply(pr, nops)) {
+        g_patch_kind[g_patch_count] = 0; /* NOP patch */
         g_patch_count++;
         return 1;
     }
@@ -213,12 +215,17 @@ static void scan_string_references(void)
                  * The relative offset stays the same. */
                 unsigned char jmp_byte = 0xEB;
 
+                if (g_patch_count >= MAX_NOCLIP_PATCHES) {
+                    LOG("NoClip: patch table full, skipping JZ->JMP at 0x%08X", jz_addr);
+                    break;
+                }
                 PatchRecord *pr = &g_patches[g_patch_count];
                 memset(pr, 0, sizeof(PatchRecord));
                 pr->addr = jz_addr;
                 pr->size = 1;
 
                 if (patch_apply(pr, &jmp_byte)) {
+                    g_patch_kind[g_patch_count] = 1; /* JZ->JMP patch */
                     g_patch_count++;
                     found++;
                     LOG("NoClip: JZ->JMP at 0x%08X (string ref 0x%08X)",
@@ -254,12 +261,18 @@ void noclip_apply(void)
         scan_collision_calls();
         scan_string_references();
     } else {
-        /* Re-apply: patch_restore preserves addr/size, so patch_apply
-         * works again with fresh NOP bytes. */
+        /* Re-apply after noclip_remove (records inactive): rewrite the
+         * original patch bytes per kind — NOP patches get NOPs,
+         * JZ->JMP patches get 0xEB (a NOP here would corrupt the branch). */
         for (int i = 0; i < g_patch_count; i++) {
-            unsigned char nops[20];
-            memset(nops, 0x90, g_patches[i].size);
-            patch_apply(&g_patches[i], nops);
+            if (g_patch_kind[i] == 1) {
+                unsigned char jmp = 0xEB;
+                patch_apply(&g_patches[i], &jmp);
+            } else {
+                unsigned char nops[20];
+                memset(nops, 0x90, g_patches[i].size);
+                patch_apply(&g_patches[i], nops);
+            }
         }
     }
 

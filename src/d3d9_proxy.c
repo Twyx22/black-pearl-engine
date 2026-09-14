@@ -23,6 +23,10 @@ BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID reserved) {
             MH_EnableHook(MH_ALL_HOOKS);
             return TRUE;
         case DLL_PROCESS_DETACH:
+            hooks_cleanup();
+            MH_DisableHook(MH_ALL_HOOKS);
+            MH_RemoveHook(MH_ALL_HOOKS);
+            MH_Uninitialize();
             save_config();
             input_cleanup();
             break;

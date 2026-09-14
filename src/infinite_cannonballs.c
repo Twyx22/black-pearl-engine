@@ -82,6 +82,8 @@ static int scan_fallback_flags(DWORD str_addr, const char *label)
         for (DWORD j = i; j + 2 < search_end; j++) {
             /* Pattern 1: FF 8E xx xx xx xx — DEC dword [esi+offset] */
             if (code[j] == 0xFF && code[j + 1] == 0x8E) {
+                if (((code[j + 1] >> 6) & 3) != 2) continue; /* mod==2 required */
+                if (j + 6 > search_end) continue; /* not fully decodable */
                 DWORD dec_addr = text_start + j;
                 if (add_nop_patch(dec_addr, 6)) {
                     LOG("InfiniteCannonballs: NOP'd DEC dword at 0x%08X (ammo decrement)", dec_addr);
@@ -93,6 +95,8 @@ static int scan_fallback_flags(DWORD str_addr, const char *label)
 
             /* Pattern 2: FF 88 xx xx xx xx — DEC dword [eax+offset] */
             if (code[j] == 0xFF && code[j + 1] == 0x88) {
+                if (((code[j + 1] >> 6) & 3) != 2) continue; /* mod==2 required */
+                if (j + 6 > search_end) continue; /* not fully decodable */
                 DWORD dec_addr = text_start + j;
                 if (add_nop_patch(dec_addr, 6)) {
                     LOG("InfiniteCannonballs: NOP'd DEC dword at 0x%08X (ammo decrement)", dec_addr);
@@ -102,9 +106,11 @@ static int scan_fallback_flags(DWORD str_addr, const char *label)
                 }
             }
 
-            /* Pattern 3: 29 xx — SUB rm, r (generic subtraction) */
+            /* Pattern 3: 29 /r mod==2 — SUB r/m32, r with disp32 */
             if (code[j] == 0x29 && (code[j + 1] & 0xC0) == 0x80) {
-                int sub_size = 2;
+                unsigned char sub_rm = code[j + 1] & 7;
+                int sub_size = (sub_rm == 4) ? 7 : 6; /* +SIB when rm==4 */
+                if (j + (DWORD)sub_size > search_end) continue; /* not decodable safely */
                 DWORD sub_addr = text_start + j;
                 if (add_nop_patch(sub_addr, sub_size)) {
                     LOG("InfiniteCannonballs: NOP'd SUB at 0x%08X (potential ammo subtraction)", sub_addr);
@@ -165,7 +171,6 @@ void infinite_cannonballs_apply(void)
                     DWORD flag_addr = text_start + i;
                     if (add_nop_patch(flag_addr, 7)) {
                         LOG("InfiniteCannonballs: NOP'd counter reset at 0x%08X (fallback-2)", flag_addr);
-                        g_patch_count++;
                         fallback2++;
                     }
                 }
@@ -175,7 +180,6 @@ void infinite_cannonballs_apply(void)
                     DWORD mov_addr = text_start + i;
                     if (add_nop_patch(mov_addr, 6)) {
                         LOG("InfiniteCannonballs: NOP'd MOV [esi+] at 0x%08X (fallback-2)", mov_addr);
-                        g_patch_count++;
                         fallback2++;
                     }
                 }

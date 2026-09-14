@@ -32,6 +32,7 @@ int favorites_is_favorite(int tab, int item) {
 }
 
 int favorites_toggle(int tab, int item) {
+    if (tab < 0 || tab >= 12 || item < 0) return 0;
     /* Remove if already favourited */
     for (int i = 0; i < s_count; i++) {
         if (s_favorites[i].tab == tab && s_favorites[i].item == item) {
@@ -57,6 +58,7 @@ int favorites_toggle(int tab, int item) {
 }
 
 int favorites_add(int tab, int item) {
+    if (tab < 0 || tab >= 12 || item < 0) return 0;
     if (s_count >= FAVORITES_MAX) return 0;
     for (int i = 0; i < s_count; i++) {
         if (s_favorites[i].tab == tab && s_favorites[i].item == item)
@@ -104,6 +106,7 @@ void favorites_serialize(void) {
 }
 
 void favorites_deserialize_add(int tab, int item) {
+    if (tab < 0 || tab >= 12 || item < 0) return;
     if (s_count < FAVORITES_MAX) {
         s_favorites[s_count].tab = tab;
         s_favorites[s_count].item = item;

@@ -275,16 +275,21 @@ void teleport_deserialize(void)
         char *val  = eq + 1;
 
         /* Trim trailing whitespace from name */
-        char *end = name + strlen(name) - 1;
-        while (end >= name && (*end == ' ' || *end == '\t')) *end-- = '\0';
+        char *end = NULL;
+        if (strlen(name) > 0) {
+            end = name + strlen(name) - 1;
+            while (end >= name && (*end == ' ' || *end == '\t')) *end-- = '\0';
+        }
 
         /* Trim leading whitespace from value */
         while (*val == ' ' || *val == '\t') val++;
 
         /* Trim trailing whitespace/newlines from value */
-        end = val + strlen(val) - 1;
-        while (end >= val && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r'))
-            *end-- = '\0';
+        if (strlen(val) > 0) {
+            end = val + strlen(val) - 1;
+            while (end >= val && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r'))
+                *end-- = '\0';
+        }
 
         /* Parse key: teleport_<slot>_<field> */
         int s;

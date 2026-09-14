@@ -119,7 +119,7 @@ int safe_read(DWORD addr, void *out, size_t len) {
  * @return 1 on success, 0 on failure (logs internally).
  */
 int patch_apply(PatchRecord *pr, const void *new_bytes) {
-    if (!pr || !new_bytes || pr->size == 0) {
+    if (!pr || !new_bytes || pr->size == 0 || pr->addr == 0) {
         LOG("patch_apply: invalid arguments");
         return 0;
     }

@@ -13,6 +13,7 @@
 #include "backends/imgui_impl_win32.h"
 #include "backends/imgui_impl_dx9.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
 
@@ -202,6 +203,8 @@ Item* menu_get_item(int tab, int item_idx) {
  * Favourites: rebuild the dynamic Favourites tab items
  * ----------------------------------------------------------------- */
 static void rebuild_fav_items(void) {
+    for (int i = 0; i < g_fav_item_count && i < FAVORITES_MAX; i++)
+        free((void*)g_fav_items[i].name);
     g_fav_item_count = 0;
     int fcount = favorites_count();
     for (int i = 0; i < fcount && i < FAVORITES_MAX; i++) {
@@ -232,6 +235,9 @@ static void rebuild_fav_items(void) {
  * Presets UI: build the preset list items dynamically
  * ----------------------------------------------------------------- */
 static void rebuild_presets_ui(void) {
+    for (int i = 0; i < PRESETS_UI_ITEMS; i++)
+        if (presets_ui_items[i].tag >= 600 && presets_ui_items[i].tag < 800)
+            free((void*)presets_ui_items[i].name);
     g_preset_count = presets_list(g_preset_list, 20);
 
     int idx = 0;
@@ -290,6 +296,8 @@ static void rebuild_presets_ui(void) {
     while (idx < PRESETS_UI_ITEMS) {
         presets_ui_items[idx].name = "---";
         presets_ui_items[idx].type = 3;
+        presets_ui_items[idx].action = NULL;
+        presets_ui_items[idx].tag = 0;
         idx++;
     }
     tabs[10].count = PRESETS_UI_ITEMS;
@@ -299,6 +307,9 @@ static void rebuild_presets_ui(void) {
  * Hotkeys UI: build the keybinding list
  * ----------------------------------------------------------------- */
 static void rebuild_hotkeys_ui(void) {
+    for (int i = 0; i < HOTKEYS_UI_ITEMS; i++)
+        if (hotkeys_ui_items[i].tag >= 1000 && hotkeys_ui_items[i].tag < 1100)
+            free((void*)hotkeys_ui_items[i].name);
     int idx = 0;
 
     /* Header: Capturing state */
@@ -362,6 +373,8 @@ static void rebuild_hotkeys_ui(void) {
     while (idx < HOTKEYS_UI_ITEMS) {
         hotkeys_ui_items[idx].name = "---";
         hotkeys_ui_items[idx].type = 3;
+        hotkeys_ui_items[idx].action = NULL;
+        hotkeys_ui_items[idx].tag = 0;
         idx++;
     }
     tabs[11].count = HOTKEYS_UI_ITEMS;
@@ -696,10 +709,12 @@ void menu_update_input(void) {
 
     /* F3: Toggle favourite for current item */
     if (key_pressed(VK_F3)) {
-        int result = favorites_toggle(g_tab, g_sel);
-        Item *it = &tabs[g_tab].items[g_sel];
-        it->favorite = result;
-        if (g_menu_open) save_config();
+        Item *it = menu_get_item(g_tab, g_sel);
+        if (it) {
+            int result = favorites_toggle(g_tab, g_sel);
+            it->favorite = result;
+            if (g_menu_open) save_config();
+        }
     }
 
     /* Enter: activate selected item */

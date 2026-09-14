@@ -184,7 +184,6 @@ void quick_combo_apply(void)
                     DWORD flag_addr = text_start + i;
                     if (add_nop_patch(flag_addr, 7)) {
                         LOG("QuickCombo: NOP'd counter reset at 0x%08X (fallback)", flag_addr);
-                        g_patch_count++;
                         fallback_patched++;
                     }
                 }

@@ -155,52 +155,53 @@ void load_config(void) {
     int is_v2 = is_v2_format(f);
     char line[256];
     int loaded = 0;
-    int in_cheats_section = 1;  /* V1 has no sections */
+    /* Single-pass section tracking: 0=none, 1=cheats, 2=favorites, 3=hotkeys.
+     * V1 files have no sections — treat everything as cheats. */
+    int section = is_v2 ? 0 : 1;
 
     while (fgets(line, sizeof(line), f)) {
-        /* Detect section headers (V2 only) */
-        if (line[0] == '[') {
+        char *sp = line;
+        while (*sp == ' ' || *sp == '\t') sp++;
+
+        /* Section header — set current section, never consume extra lines */
+        if (*sp == '[') {
             if (is_v2) {
-                in_cheats_section = (_strnicmp(line, "[Cheats]", 8) == 0) ? 1 : 0;
-                /* Future: handle [Favorites] and [Hotkeys] sections */
-                if (_strnicmp(line, "[Favorites]", 11) == 0) {
-                    /* Read favorites */
-                    while (fgets(line, sizeof(line), f)) {
-                        char *p = line;
-                        while (*p == ' ' || *p == '\t') p++;
-                        if (*p == '[' || *p == '\0' || *p == '\n') break;
-                        if (*p == '#' || *p == ';') continue;
-
-                        int tab = -1, item = -1;
-                        if (sscanf(p, "favorite_%*d=%d,%d", &tab, &item) >= 2) {
-                            if (tab >= 0 && item >= 0)
-                                favorites_deserialize_add(tab, item);
-                        }
-                    }
-                }
-                if (_strnicmp(line, "[Hotkeys]", 9) == 0) {
-                    /* Read hotkeys */
-                    while (fgets(line, sizeof(line), f)) {
-                        char *p = line;
-                        while (*p == ' ' || *p == '\t') p++;
-                        if (*p == '[' || *p == '\0' || *p == '\n') break;
-                        if (*p == '#' || *p == ';') continue;
-
-                        int vk = 0, tab = 0, item = 0;
-                        if (sscanf(p, "hotkey_%*d=0x%x,%d,%d", &vk, &tab, &item) >= 3) {
-                            if (vk > 0 && tab >= 0 && item >= 0)
-                                hotkeys_bind(vk, tab, item);
-                        } else if (sscanf(p, "hotkey_%*d=%d,%d,%d", &vk, &tab, &item) >= 3) {
-                            if (vk > 0 && tab >= 0 && item >= 0)
-                                hotkeys_bind(vk, tab, item);
-                        }
-                    }
-                }
+                if (_strnicmp(sp, "[Cheats]", 8) == 0) section = 1;
+                else if (_strnicmp(sp, "[Favorites]", 11) == 0) section = 2;
+                else if (_strnicmp(sp, "[Hotkeys]", 9) == 0) section = 3;
+                else section = 0;
             }
             continue;
         }
 
-        if (!in_cheats_section && is_v2) continue;
+        /* Skip comments and blank lines */
+        if (*sp == '#' || *sp == ';' || *sp == '\n' || *sp == '\r' || *sp == '\0')
+            continue;
+
+        /* Favorites section: favorite_<n>=<tab>,<item> */
+        if (is_v2 && section == 2) {
+            int tab = -1, item = -1;
+            if (sscanf(sp, "favorite_%*d=%d,%d", &tab, &item) >= 2) {
+                if (tab >= 0 && tab <= 11 && item >= 0 && item <= 63)
+                    favorites_deserialize_add(tab, item);
+            }
+            continue;
+        }
+
+        /* Hotkeys section: hotkey_<n>=<vk>,<tab>,<item> (vk hex or decimal) */
+        if (is_v2 && section == 3) {
+            int vk = 0, tab = 0, item = 0;
+            int ok = 0;
+            if (sscanf(sp, "hotkey_%*d=0x%x,%d,%d", &vk, &tab, &item) >= 3) ok = 1;
+            else if (sscanf(sp, "hotkey_%*d=%d,%d,%d", &vk, &tab, &item) >= 3) ok = 1;
+            if (ok && vk >= 1 && vk <= 255 &&
+                vk != 0x70 && vk != 0x71 && vk != 0x72 &&  /* F1/F2/F3 reserved */
+                tab >= 0 && tab <= 11 && item >= 0 && item <= 63)
+                hotkeys_bind(vk, tab, item);
+            continue;
+        }
+
+        if (is_v2 && section != 1) continue;
 
         char name[64];
         int value;

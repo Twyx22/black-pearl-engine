@@ -41,7 +41,7 @@ void score_mult_apply(void) {
     /* Switching from one multiplier to another:
      *   native_score_multiplier(0) disables ALL score cheats
      *   (including always_score_multiply), giving us a clean slate. */
-    if (g_prev_mult > 0) {
+    if (g_prev_mult > 0 && !g_cheats.always_gold) {
         native_score_multiplier(0);
     }
 
