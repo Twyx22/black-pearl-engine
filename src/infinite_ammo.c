@@ -280,6 +280,11 @@ void infinite_ammo_apply(void)
     tier3_force_values();
 }
 
+void infinite_ammo_force_frame(void)
+{
+    tier3_force_values();
+}
+
 void infinite_ammo_remove(void)
 {
     /* Tier 1: Deactivate native cheat */

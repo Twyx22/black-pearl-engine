@@ -28,6 +28,7 @@ typedef struct {
     DWORD addr;
     unsigned char val;
     bool enabled;
+    int logged;  /* 1 = invalid state already logged, throttle per-slot */
 } FreezeSlot;
 
 typedef struct {
@@ -116,6 +117,13 @@ static int addr_is_code(DWORD addr) {
     return 0;
 }
 
+static int range_is_readable(DWORD addr, size_t len) {
+    for (size_t i = 0; i < len; i++)
+        if (!addr_is_readable(addr + (DWORD)i))
+            return 0;
+    return 1;
+}
+
 static const char *addr_section_name(DWORD addr) {
     for (int i = 0; i < g_sec_count; i++)
         if (addr >= g_secs[i].start && addr < g_secs[i].end)
@@ -132,7 +140,7 @@ static void load_page(DWORD base) {
 
     for (int r = 0; r < MB_ROWS_PER_PAGE; r++) {
         DWORD addr = base + (DWORD)(r * MB_BYTES_PER_ROW);
-        if (addr_is_readable(addr)) {
+        if (range_is_readable(addr, MB_BYTES_PER_ROW)) {
             if (safe_read(addr, g_buf + r * MB_BYTES_PER_ROW, MB_BYTES_PER_ROW))
                 g_row_valid[r] = 1;
             else
@@ -213,15 +221,35 @@ static void run_search(const AobPattern *pat) {
         if (is_r && mbi.RegionSize > 0) {
             unsigned char *scan_start = (unsigned char *)mbi.BaseAddress;
             SIZE_T scan_len = mbi.RegionSize;
-
-            for (SIZE_T off = 0; off + pat->len <= scan_len; off++) {
-                if (match_aob(scan_start + off, pat)) {
-                    if (g_search_count < MB_MAX_SEARCH) {
-                        g_search_results[g_search_count++] = (DWORD)(scan_start + off);
-                    } else {
-                        goto done;
+            /* Chunked safe_read: avoids direct deref (race if page freed
+             * mid-scan) without unbounded malloc on huge regions. */
+            unsigned char chunk[4096 + 256];
+            SIZE_T carry = 0;  /* overlap bytes carried from previous chunk */
+            for (SIZE_T base = 0; base < scan_len; ) {
+                SIZE_T want = sizeof(chunk) - 256;
+                if (want > scan_len - base) want = scan_len - base;
+                SIZE_T get = carry + want;
+                if (!safe_read((DWORD)(scan_start + base - carry),
+                               chunk, (size_t)get))
+                    break;  /* page went away mid-scan: skip rest of region */
+                for (SIZE_T off = 0; off + pat->len <= get; off++) {
+                    /* Offsets fully inside the carried overlap were scanned */
+                    if (base > 0 && off + (SIZE_T)pat->len <= carry)
+                        continue;
+                    if (match_aob(chunk + off, pat)) {
+                        if (g_search_count < MB_MAX_SEARCH) {
+                            g_search_results[g_search_count++] =
+                                (DWORD)(scan_start + base - carry + off);
+                        } else {
+                            goto done;
+                        }
                     }
                 }
+                if (g_search_count >= MB_MAX_SEARCH) goto done;
+                /* Tail overlap re-read next iter so straddling patterns match */
+                carry = (SIZE_T)pat->len - 1;
+                base += want;
+                if (want == 0) break;
             }
         }
 
@@ -382,9 +410,11 @@ static void render_hex_dump(void) {
             ImGui::PushID(r * 16 + c);
             ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(col), "%s", hex);
             if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(0)) {
-                selected_row = r;
-                selected_col = c;
-                set_edit = 1;
+                if (g_row_valid[r] > 0) {
+                    selected_row = r;
+                    selected_col = c;
+                    set_edit = 1;
+                }
             }
             ImGui::PopID();
 
@@ -414,7 +444,8 @@ static void render_hex_dump(void) {
     ImGui::EndChild();
 
     /* ---- Edit popup ---- */
-    if (set_edit && selected_row >= 0 && selected_col >= 0) {
+    if (set_edit && selected_row >= 0 && selected_col >= 0 &&
+        selected_row < MB_ROWS_PER_PAGE && g_row_valid[selected_row] > 0) {
         g_edit_addr = g_base + (DWORD)(selected_row * 16 + selected_col);
         g_edit_hex[0] = 0;
         g_edit_active = 1;
@@ -440,9 +471,12 @@ static void render_hex_dump(void) {
             unsigned int val;
             if (sscanf(g_edit_hex, "%02x", &val) == 1) {
                 unsigned char byte_val = (unsigned char)(val & 0xFF);
-                if (safe_write(g_edit_addr, &byte_val, 1)) {
+                if (addr_is_readable(g_edit_addr) &&
+                    safe_write(g_edit_addr, &byte_val, 1)) {
                     LOG("Memory Browser: wrote %02X to 0x%08X", byte_val, g_edit_addr);
                     load_page(g_base);  /* refresh view */
+                } else {
+                    LOG("Memory Browser: write failed at 0x%08X (unreadable)", g_edit_addr);
                 }
             }
             g_edit_active = 0;
@@ -559,6 +593,7 @@ static void render_freeze(void) {
                 g_freeze[g_freeze_count].addr    = addr;
                 g_freeze[g_freeze_count].val     = (unsigned char)(val & 0xFF);
                 g_freeze[g_freeze_count].enabled = true;
+                g_freeze[g_freeze_count].logged  = 0;
                 g_freeze_count++;
                 LOG("Memory Browser: freeze slot %d = 0x%08X = %02X",
                     g_freeze_count - 1, addr, (unsigned char)(val & 0xFF));
@@ -591,8 +626,22 @@ static void render_freeze(void) {
 /* ---- Apply freeze values (called every frame) ---- */
 static void apply_freeze(void) {
     for (int i = 0; i < g_freeze_count; i++) {
-        if (g_freeze[i].enabled) {
-            safe_write(g_freeze[i].addr, &g_freeze[i].val, 1);
+        if (!g_freeze[i].enabled)
+            continue;
+        if (g_freeze[i].addr == 0 || !addr_is_readable(g_freeze[i].addr)) {
+            if (!g_freeze[i].logged) {
+                LOG("Memory Browser: freeze slot %d invalid (addr=0x%08X), skipping",
+                    i, g_freeze[i].addr);
+                g_freeze[i].logged = 1;
+            }
+            continue;
+        }
+        if (safe_write(g_freeze[i].addr, &g_freeze[i].val, 1))
+            g_freeze[i].logged = 0;  /* re-arm log on next failure */
+        else if (!g_freeze[i].logged) {
+            LOG("Memory Browser: freeze slot %d write failed (addr=0x%08X)",
+                i, g_freeze[i].addr);
+            g_freeze[i].logged = 1;
         }
     }
 }

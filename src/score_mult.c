@@ -20,6 +20,11 @@ static int g_prev_mult = 0;
 /* ------------------------------------------------------------------ */
 
 void score_mult_set(int multiplier) {
+    if (multiplier != 0 && multiplier != 2 && multiplier != 4 &&
+        multiplier != 6 && multiplier != 8 && multiplier != 10) {
+        LOG("Score Multiplier: ignored invalid value %d (valid: 0,2,4,6,8,10)", multiplier);
+        return;
+    }
     g_cheats.score_mult = multiplier;
 }
 

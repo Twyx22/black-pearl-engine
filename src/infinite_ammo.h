@@ -12,5 +12,8 @@
 
 void infinite_ammo_apply(void);
 void infinite_ammo_remove(void);
+/* Per-frame re-force of Tier 3 values (the game rewrites them).
+ * Called from update_cheats() only while infinite_ammo is active. */
+void infinite_ammo_force_frame(void);
 
 #endif /* BPE_INFINITE_AMMO_H */

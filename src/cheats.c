@@ -16,6 +16,19 @@
 
 CheatsState g_cheats = {0, 0, 0, 0, 100, 1, 0, 0, 0, 0, 0, 1, CUSTOM_STUD_DEFAULT, 1, GOLDEN_BRICK_DEFAULT, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 75, 0, 0, 0, 0, 0};
 
+/* Cached module base for ASLR-safe rebase of absolute Cheat Engine VAs.
+ * CE reports VAs against the preferred base 0x400000; the runtime base
+ * may differ, so image addresses are computed as game_base() + (VA - 0x400000). */
+static DWORD game_base(void) {
+    static DWORD base = 0;
+    if (!base) base = (DWORD)GetModuleHandleA(NULL);
+    return base;
+}
+
+static int clamp_int(int v, int lo, int hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
 /* Stud patch: NOP sub ebx,eax and sbb esi,edx at fixed addresses (Cheat Engine found) */
 static unsigned char g_stud_sub_orig[2] = {0};
 static unsigned char g_stud_sbb_orig[2] = {0};
@@ -235,6 +248,10 @@ void remove_breath_patch(void) {
 
 void force_custom_studs(void) {
     if (!g_cheats.force_custom_studs) return;
+    /* NOTE: STUD_DISPLAY_ADDR (0x0369B660) is intentionally absolute.
+     * It lies below the image base (0x400000), so it cannot be an image
+     * RVA (as offset 0x329B660 it would far exceed the ~13MB image);
+     * it is a heap/global address valid as-is. */
     DWORD addr = STUD_DISPLAY_ADDR;
     DWORD old;
     if (VirtualProtect((LPVOID)addr, 4, PAGE_READWRITE, &old)) {
@@ -262,28 +279,44 @@ void force_golden_bricks(void) {
 
 static float g_speed_walk_orig = SPEED_WALK_DEFAULT;
 static float g_speed_run_orig  = SPEED_RUN_DEFAULT;
+static int g_speed_orig_read = 0;
 
 void apply_super_speed(void) {
-    DWORD old;
-    if (VirtualProtect((LPVOID)SPEED_WALK_ADDR, 4, PAGE_READWRITE, &old)) {
-        *(float*)SPEED_WALK_ADDR = SPEED_WALK_CHEAT;
-        VirtualProtect((LPVOID)SPEED_WALK_ADDR, 4, old, &old);
+    DWORD walk = game_base() + (SPEED_WALK_ADDR - 0x400000);
+    DWORD run = game_base() + (SPEED_RUN_ADDR - 0x400000);
+    if (!g_speed_orig_read) {
+        float w, r;
+        if (safe_read(walk, &w, 4) && safe_read(run, &r, 4)) {
+            g_speed_walk_orig = w;
+            g_speed_run_orig = r;
+        } else {
+            LOG("Super Speed: cannot read originals, fallback %.1f/%.1f",
+                (double)SPEED_WALK_DEFAULT, (double)SPEED_RUN_DEFAULT);
+        }
+        g_speed_orig_read = 1;
     }
-    if (VirtualProtect((LPVOID)SPEED_RUN_ADDR, 4, PAGE_READWRITE, &old)) {
-        *(float*)SPEED_RUN_ADDR = SPEED_RUN_CHEAT;
-        VirtualProtect((LPVOID)SPEED_RUN_ADDR, 4, old, &old);
+    DWORD old;
+    if (VirtualProtect((LPVOID)walk, 4, PAGE_READWRITE, &old)) {
+        *(float*)walk = SPEED_WALK_CHEAT;
+        VirtualProtect((LPVOID)walk, 4, old, &old);
+    }
+    if (VirtualProtect((LPVOID)run, 4, PAGE_READWRITE, &old)) {
+        *(float*)run = SPEED_RUN_CHEAT;
+        VirtualProtect((LPVOID)run, 4, old, &old);
     }
 }
 
 void remove_super_speed(void) {
+    DWORD walk = game_base() + (SPEED_WALK_ADDR - 0x400000);
+    DWORD run = game_base() + (SPEED_RUN_ADDR - 0x400000);
     DWORD old;
-    if (VirtualProtect((LPVOID)SPEED_WALK_ADDR, 4, PAGE_READWRITE, &old)) {
-        *(float*)SPEED_WALK_ADDR = g_speed_walk_orig;
-        VirtualProtect((LPVOID)SPEED_WALK_ADDR, 4, old, &old);
+    if (VirtualProtect((LPVOID)walk, 4, PAGE_READWRITE, &old)) {
+        *(float*)walk = g_speed_walk_orig;
+        VirtualProtect((LPVOID)walk, 4, old, &old);
     }
-    if (VirtualProtect((LPVOID)SPEED_RUN_ADDR, 4, PAGE_READWRITE, &old)) {
-        *(float*)SPEED_RUN_ADDR = g_speed_run_orig;
-        VirtualProtect((LPVOID)SPEED_RUN_ADDR, 4, old, &old);
+    if (VirtualProtect((LPVOID)run, 4, PAGE_READWRITE, &old)) {
+        *(float*)run = g_speed_run_orig;
+        VirtualProtect((LPVOID)run, 4, old, &old);
     }
 }
 
@@ -342,7 +375,7 @@ static void remove_scale_patches(void) {
 void apply_char_scale(void) {
     static int prev = 0;
     if (!prev) { LOG("Char Scale: on"); prev = 1; }
-    apply_scale_val((float)g_cheats.char_scale_val / 100.0f);
+    apply_scale_val((float)clamp_int(g_cheats.char_scale_val, 10, 1000) / 100.0f);
 }
 
 void remove_char_scale(void) {
@@ -408,8 +441,8 @@ static void remove_gravity_mult(void) {
 
 void apply_super_jump(void) {
     static int prev = 0;
-    if (!prev) { LOG("Y-Velocity: %.1f", (float)g_cheats.super_jump_scale / 10.0f); prev = 1; }
-    apply_gravity_mult((float)g_cheats.super_jump_scale / 10.0f);
+    if (!prev) { LOG("Y-Velocity: %.1f", (float)clamp_int(g_cheats.super_jump_scale, -10, 1000) / 10.0f); prev = 1; }
+    apply_gravity_mult((float)clamp_int(g_cheats.super_jump_scale, -10, 1000) / 10.0f);
 }
 
 void remove_super_jump(void) {
@@ -766,12 +799,8 @@ void update_cheats(void) {
     static CheatsState g_prev = {0};
 
     /* Dirty flag: skip patch apply/remove unless state changed.
-     * Force-writes (custom studs, golden bricks) still run every frame. */
-    if (memcmp(&g_cheats, &g_prev, sizeof(CheatsState)) == 0) {
-        force_custom_studs();
-        force_golden_bricks();
-        return;
-    }
+     * Per-frame force-writes run once at the end for all paths (single site). */
+    if (memcmp(&g_cheats, &g_prev, sizeof(CheatsState)) != 0) {
 
     /* Detect rising edges for one-shot actions */
     int time_freeze_rising = g_cheats.time_freeze && !g_prev.time_freeze;
@@ -787,9 +816,9 @@ void update_cheats(void) {
 
     /* Update scale/gravity multipliers when already patched */
     if (g_gravity_patched)
-        g_gravity_mult = (float)g_cheats.super_jump_scale / 10.0f;
+        g_gravity_mult = (float)clamp_int(g_cheats.super_jump_scale, -10, 1000) / 10.0f;
     if (g_scale_patched)
-        g_scale_val = (float)g_cheats.char_scale_val / 100.0f;
+        g_scale_val = (float)clamp_int(g_cheats.char_scale_val, 10, 1000) / 100.0f;
 
     /* ================================================================
      * DAMAGE SYSTEM - Mutual Exclusion Rules
@@ -876,12 +905,17 @@ void update_cheats(void) {
         LOG("Time Freeze ON");
     }
 
-    force_custom_studs();
-    force_golden_bricks();
     if (g_cheats.stud_magnet) stud_magnet_apply(); else stud_magnet_remove();
     water_set_enabled(g_cheats.remove_water);
     if (g_cheats.score_mult) score_mult_apply(); else score_mult_remove();
     if (g_cheats.show_debug) {
         scan_entities();
     }
+    } /* end dirty-only dispatch */
+
+    /* Per-frame force-writes (single site, all paths): the game rewrites
+     * these values, so they must be re-applied every frame. */
+    force_custom_studs();
+    force_golden_bricks();
+    if (g_cheats.infinite_ammo) infinite_ammo_force_frame();
 }
