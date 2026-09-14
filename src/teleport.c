@@ -214,9 +214,12 @@ void teleport_set_label(int slot, const char *label)
 
 void teleport_serialize(void)
 {
-    FILE *f = fopen(TELEPORT_FILE, "w");
+    char path[MAX_PATH], tmp[MAX_PATH + 8];
+    bpe_path(path, sizeof(path), TELEPORT_FILE);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *f = fopen(tmp, "w");
     if (!f) {
-        LOG("Teleport: cannot write %s", TELEPORT_FILE);
+        LOG("Teleport: cannot write %s", tmp);
         return;
     }
 
@@ -243,12 +246,18 @@ void teleport_serialize(void)
     }
 
     fclose(f);
-    LOG("Teleport: saved %d slot(s) to %s", TELEPORT_MAX_SLOTS, TELEPORT_FILE);
+    if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING)) {
+        LOG("Teleport: failed to replace %s (kept old file)", path);
+        return;
+    }
+    LOG("Teleport: saved %d slot(s) to %s", TELEPORT_MAX_SLOTS, path);
 }
 
 void teleport_deserialize(void)
 {
-    FILE *f = fopen(TELEPORT_FILE, "r");
+    char path[MAX_PATH];
+    bpe_path(path, sizeof(path), TELEPORT_FILE);
+    FILE *f = fopen(path, "r");
     if (!f) {
         /* First run — no teleport file yet, that's fine */
         return;
@@ -316,6 +325,6 @@ void teleport_deserialize(void)
         if (g_slots[i].active) active++;
     }
     if (active > 0 || count > 0) {
-        LOG("Teleport: loaded %d active slot(s) from %s", active, TELEPORT_FILE);
+        LOG("Teleport: loaded %d active slot(s) from %s", active, path);
     }
 }

@@ -165,4 +165,6 @@ typedef struct {
  */
 DWORD find_pattern_cached(AobCache *cache);
 
+void bpe_path(char *out, size_t sz, const char *file);
+
 #endif /* BPE_UTILS_H */

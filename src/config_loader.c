@@ -146,9 +146,11 @@ static int parse_kv_line(const char *line, char *name, int name_sz, int *value) 
  * Load config — supports V2 section-based format and auto-migrates old
  * ----------------------------------------------------------------- */
 void load_config(void) {
-    FILE *f = fopen(CONFIG_FILE, "r");
+    char path[MAX_PATH];
+    bpe_path(path, sizeof(path), CONFIG_FILE);
+    FILE *f = fopen(path, "r");
     if (!f) {
-        LOG("Config: no %s found, using defaults", CONFIG_FILE);
+        LOG("Config: no %s found, using defaults", path);
         return;
     }
 
@@ -216,7 +218,7 @@ void load_config(void) {
     }
     fclose(f);
 
-    LOG("Config: loaded %d settings from %s (v%d format)", loaded, CONFIG_FILE, is_v2 ? 2 : 1);
+    LOG("Config: loaded %d settings from %s (v%d format)", loaded, path, is_v2 ? 2 : 1);
 
     /* Migrate old format: write V2 on next save */
     if (!is_v2 && loaded > 0) {
@@ -230,9 +232,12 @@ void load_config(void) {
  * Save config in V2 section-based format
  * ----------------------------------------------------------------- */
 void save_config(void) {
-    FILE *f = fopen(CONFIG_FILE, "w");
+    char path[MAX_PATH], tmp[MAX_PATH + 8];
+    bpe_path(path, sizeof(path), CONFIG_FILE);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *f = fopen(tmp, "w");
     if (!f) {
-        LOG("Config: failed to write %s", CONFIG_FILE);
+        LOG("Config: failed to write %s", tmp);
         return;
     }
 
@@ -279,6 +284,10 @@ void save_config(void) {
     }
 
     fclose(f);
+    if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING)) {
+        LOG("Config: failed to replace %s (kept old file)", path);
+        return;
+    }
     LOG("Config: saved %d settings, %d favorites, %d hotkeys to %s",
-        MAP_COUNT, fcount, hk_count, CONFIG_FILE);
+        MAP_COUNT, fcount, hk_count, path);
 }

@@ -289,3 +289,21 @@ DWORD find_pattern_cached(AobCache *cache) {
     cache->scanned = 1;
     return cache->result;
 }
+
+void bpe_path(char *out, size_t sz, const char *file) {
+    if (!out || sz == 0 || !file) return;
+    char mod[MAX_PATH];
+    DWORD n = GetModuleFileNameA(g_hinst, mod, sizeof(mod));
+    if (n == 0 || n >= sizeof(mod)) {
+        snprintf(out, sz, "%s", file);
+        return;
+    }
+    char *sep = strrchr(mod, '\\');
+    if (!sep) sep = strrchr(mod, '/');
+    if (!sep) {
+        snprintf(out, sz, "%s", file);
+        return;
+    }
+    *sep = '\0';
+    snprintf(out, sz, "%s\\%s", mod, file);
+}

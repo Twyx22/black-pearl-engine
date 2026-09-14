@@ -78,8 +78,15 @@ static void s_field_set(int idx, int val) {
 /* -----------------------------------------------------------------
  * Helpers
  * ----------------------------------------------------------------- */
-static void build_path(char *buf, size_t sz, const char *name) {
-    snprintf(buf, sz, PRESET_PREFIX "%s" PRESET_SUFFIX, name);
+static int build_path(char *buf, size_t sz, const char *name) {
+    if (!buf || sz == 0 || !name || !*name) return 0;
+    if (strlen(name) >= PRESET_NAME_LEN) return 0;
+    if (strstr(name, "..")) return 0;
+    if (strpbrk(name, "/\\:")) return 0;
+    char file[sizeof(PRESET_PREFIX) + PRESET_NAME_LEN + sizeof(PRESET_SUFFIX)];
+    snprintf(file, sizeof(file), PRESET_PREFIX "%s" PRESET_SUFFIX, name);
+    bpe_path(buf, sz, file);
+    return 1;
 }
 
 static int file_exists(const char *path) {
@@ -96,10 +103,11 @@ void presets_init(void) {
 }
 
 int presets_save(const char *name) {
-    if (!name || !*name) return 0;
-
     char path[260];
-    build_path(path, sizeof(path), name);
+    if (!build_path(path, sizeof(path), name)) {
+        LOG("Presets: invalid preset name '%s'", name ? name : "(null)");
+        return 0;
+    }
 
     FILE *f = fopen(path, "w");
     if (!f) {
@@ -120,10 +128,11 @@ int presets_save(const char *name) {
 }
 
 int presets_load(const char *name) {
-    if (!name || !*name) return 0;
-
     char path[260];
-    build_path(path, sizeof(path), name);
+    if (!build_path(path, sizeof(path), name)) {
+        LOG("Presets: invalid preset name '%s'", name ? name : "(null)");
+        return 0;
+    }
 
     if (!file_exists(path)) {
         LOG("Presets: '%s' not found", name);
@@ -168,10 +177,11 @@ int presets_load(const char *name) {
 }
 
 int presets_delete(const char *name) {
-    if (!name || !*name) return 0;
-
     char path[260];
-    build_path(path, sizeof(path), name);
+    if (!build_path(path, sizeof(path), name)) {
+        LOG("Presets: invalid preset name '%s'", name ? name : "(null)");
+        return 0;
+    }
 
     if (!file_exists(path)) {
         LOG("Presets: '%s' not found, nothing to delete", name);
@@ -187,9 +197,12 @@ int presets_delete(const char *name) {
 }
 
 int presets_list(char names[][PRESET_NAME_LEN], int max) {
-    /* Scan current directory for bpe_preset_*.cfg files */
+    /* Scan the DLL directory for bpe_preset_*.cfg files */
+    char dir[MAX_PATH], pattern[MAX_PATH + 32];
+    bpe_path(dir, sizeof(dir), "");
+    snprintf(pattern, sizeof(pattern), "%s" PRESET_PREFIX "*" PRESET_SUFFIX, dir);
     struct _finddata_t fd;
-    intptr_t handle = _findfirst(PRESET_PREFIX "*" PRESET_SUFFIX, &fd);
+    intptr_t handle = _findfirst(pattern, &fd);
     if (handle == -1) return 0;
 
     int count = 0;
